@@ -1,0 +1,1825 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=yes, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#1e293b">
+  <meta name="format-detection" content="telephone=no">
+  <title>Dashboard - Thống kê tuyển dụng</title>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+  <style>
+    /* ===== RESET & BASE ===== */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ===== IOS SAFARI FIX ===== */
+    @supports (-webkit-touch-callout: none) {
+      input, select, textarea, button {
+        font-size: 16px !important;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      select {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2364748b'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 14px center;
+        padding-right: 36px;
+      }
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #f1f5f9;
+      min-height: 100vh;
+      min-height: -webkit-fill-available;
+      padding: 12px;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .dashboard-container {
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    /* ===== HEADER ===== */
+    .dashboard-header {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      border-radius: 24px;
+      padding: 16px 20px;
+      margin-bottom: 20px;
+      color: #ffffff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .dashboard-header h1 {
+      font-size: 1.3rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .dashboard-header h1 i {
+      color: #10b981;
+    }
+
+    .date-picker-area {
+      display: flex;
+      gap: 10px;
+      background: rgba(255, 255, 255, 0.1);
+      padding: 4px 12px;
+      border-radius: 50px;
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .date-picker-area input {
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      padding: 6px 14px;
+      border-radius: 40px;
+      color: #ffffff;
+      font-size: 0.85rem;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    .date-picker-area input::-webkit-calendar-picker-indicator {
+      filter: invert(1);
+    }
+
+    .date-picker-area button {
+      background: #10b981;
+      border: none;
+      padding: 6px 18px;
+      border-radius: 40px;
+      color: #ffffff;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      touch-action: manipulation;
+      min-height: 36px;
+      font-size: 0.85rem;
+    }
+
+    .date-picker-area button:active {
+      transform: scale(0.96);
+    }
+
+    .date-picker-area button:hover {
+      background: #059669;
+    }
+
+    /* ===== STATS GRID ===== */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+
+    .stat-card {
+      background: #ffffff;
+      border-radius: 20px;
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+      transition: all 0.2s;
+    }
+
+    .stat-card:active {
+      transform: scale(0.98);
+    }
+
+    .stat-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      flex-shrink: 0;
+    }
+
+    .stat-icon.app1 { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: #ffffff; }
+    .stat-icon.app2 { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: #ffffff; }
+    .stat-icon.app3 { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); color: #ffffff; }
+    .stat-icon.app4 { background: linear-gradient(135deg, #059669 0%, #10b981 100%); color: #ffffff; }
+    .stat-icon.complete { background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%); color: #ffffff; }
+
+    .stat-info h3 {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      color: #64748b;
+      letter-spacing: 0.5px;
+    }
+
+    .stat-info .number {
+      font-size: 1.6rem;
+      font-weight: 800;
+      color: #1e293b;
+      line-height: 1.2;
+    }
+
+    .stat-info .unit {
+      font-size: 0.65rem;
+      color: #94a3b8;
+    }
+
+    /* ===== CHART ROW ===== */
+    .chart-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .chart-card {
+      background: #ffffff;
+      border-radius: 20px;
+      padding: 16px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    }
+
+    .chart-card h3 {
+      font-size: 0.9rem;
+      margin-bottom: 12px;
+      color: #1e293b;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .chart-wrapper {
+      position: relative;
+      height: 250px;
+    }
+
+    canvas {
+      max-height: 240px;
+      width: 100%;
+    }
+
+    /* ===== COMPARISON CARD ===== */
+    .comparison-card {
+      background: #ffffff;
+      border-radius: 20px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+
+    .comparison-header {
+      background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%);
+      padding: 14px 18px;
+      color: #ffffff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .comparison-header h2 {
+      font-size: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tab-switch {
+      display: flex;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.2);
+      padding: 3px;
+      border-radius: 60px;
+    }
+
+    .tab-switch button {
+      background: transparent;
+      border: none;
+      padding: 5px 14px;
+      border-radius: 60px;
+      color: #ffffff;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 0.7rem;
+      touch-action: manipulation;
+      min-height: 30px;
+    }
+
+    .tab-switch button:active {
+      transform: scale(0.96);
+    }
+
+    .tab-switch button.active {
+      background: #ffffff;
+      color: #0f766e;
+    }
+
+    /* ===== FILTER BAR ===== */
+    .filter-bar {
+      padding: 12px 16px;
+      background: #f8fafc;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .filter-bar input,
+    .filter-bar select {
+      padding: 6px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 40px;
+      font-size: 0.75rem;
+      min-width: 140px;
+      background: #ffffff;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    .filter-bar input:focus,
+    .filter-bar select:focus {
+      outline: none;
+      border-color: #0f766e;
+    }
+
+    .filter-bar button {
+      padding: 6px 16px;
+      border: none;
+      border-radius: 40px;
+      color: #ffffff;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.75rem;
+      touch-action: manipulation;
+      min-height: 32px;
+      transition: all 0.2s;
+    }
+
+    .filter-bar button:active {
+      transform: scale(0.96);
+    }
+
+    .filter-bar .btn-export {
+      background: #3b82f6;
+    }
+
+    .filter-bar .btn-export-master {
+      background: #2e7d32;
+    }
+
+    .filter-bar .btn-export-master:hover {
+      background: #1b5e20;
+    }
+
+    .filter-bar .btn-clear {
+      background: #ef4444;
+    }
+
+    .filter-bar .btn-clear:hover {
+      background: #dc2626;
+    }
+
+    /* ===== TABLE ===== */
+    .table-container {
+      max-height: 450px;
+      overflow-y: auto;
+      overflow-x: auto;
+      position: relative;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .comparison-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.75rem;
+      min-width: 700px;
+    }
+
+    .comparison-table thead tr {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .comparison-table th {
+      background: #f1f5f9;
+      padding: 10px 10px;
+      text-align: left;
+      font-weight: 700;
+      color: #1e293b;
+      border-bottom: 2px solid #e2e8f0;
+      cursor: pointer;
+      user-select: none;
+      position: relative;
+      white-space: nowrap;
+    }
+
+    .comparison-table th:active {
+      background: #e2e8f0;
+    }
+
+    .comparison-table th i.fa-sort {
+      margin-left: 4px;
+      font-size: 0.6rem;
+      color: #94a3b8;
+    }
+
+    .comparison-table th .filter-icon {
+      margin-left: 6px;
+      opacity: 0.5;
+      cursor: pointer;
+      display: inline-block;
+      padding: 2px 4px;
+    }
+
+    .comparison-table th .filter-icon:active {
+      opacity: 1;
+    }
+
+    .comparison-table th .filter-active {
+      opacity: 1;
+      color: #0f766e;
+    }
+
+    .comparison-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e2e8f0;
+      color: #334155;
+      vertical-align: middle;
+    }
+
+    .comparison-table tr:active {
+      background: #f8fafc;
+    }
+
+    .comparison-table .text-center {
+      text-align: center;
+    }
+
+    /* ===== STATUS BADGE ===== */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 10px;
+      border-radius: 30px;
+      font-size: 0.65rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .status-done {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .status-missing {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .status-icon-check {
+      color: #10b981;
+      font-size: 1.1rem;
+    }
+
+    .status-icon-times {
+      color: #ef4444;
+      font-size: 1.1rem;
+    }
+
+    /* ===== FILTER POPUP ===== */
+    .excel-filter-popup {
+      position: fixed;
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+      z-index: 10000;
+      min-width: 240px;
+      max-width: 300px;
+      animation: dashFadeInScale 0.15s ease;
+    }
+
+    @keyframes dashFadeInScale {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    .filter-header {
+      padding: 10px 14px;
+      background: #f1f5f9;
+      border-bottom: 1px solid #e2e8f0;
+      border-radius: 12px 12px 0 0;
+      font-weight: 700;
+      color: #1e293b;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.8rem;
+    }
+
+    .filter-header .close-filter {
+      cursor: pointer;
+      font-size: 1rem;
+      color: #94a3b8;
+      padding: 0 4px;
+    }
+
+    .filter-header .close-filter:active {
+      color: #ef4444;
+    }
+
+    .filter-body {
+      padding: 14px;
+    }
+
+    .filter-input-group {
+      margin-bottom: 12px;
+    }
+
+    .filter-input-group label {
+      display: block;
+      font-size: 0.65rem;
+      font-weight: 600;
+      color: #64748b;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+    }
+
+    .filter-input-group input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      box-sizing: border-box;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    .filter-input-group input:focus {
+      outline: none;
+      border-color: #0f766e;
+      box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.2);
+    }
+
+    .filter-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .filter-actions button {
+      flex: 1;
+      padding: 8px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      font-size: 0.75rem;
+      touch-action: manipulation;
+      min-height: 32px;
+    }
+
+    .filter-actions button:active {
+      transform: scale(0.96);
+    }
+
+    .filter-actions .btn-apply {
+      background: #0f766e;
+      color: #ffffff;
+    }
+
+    .filter-actions .btn-clear {
+      background: #e2e8f0;
+      color: #334155;
+    }
+
+    .filter-hint {
+      font-size: 0.6rem;
+      color: #94a3b8;
+      margin-top: 10px;
+      text-align: center;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 8px;
+    }
+
+    /* ===== MODAL ===== */
+    .dash-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      height: -webkit-fill-available;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 2000;
+      padding: 20px;
+    }
+
+    .dash-modal.active {
+      display: flex;
+    }
+
+    .dash-modal-content {
+      background: #ffffff;
+      border-radius: 28px;
+      padding: 24px;
+      width: 90%;
+      max-width: 400px;
+      text-align: center;
+      animation: dashFadeInScale 0.25s ease;
+    }
+
+    .dash-modal-content h3 {
+      margin-bottom: 16px;
+      color: #1e293b;
+      font-size: 1.1rem;
+    }
+
+    .dash-modal-select {
+      width: 100%;
+      padding: 12px 14px;
+      border: 2px solid #e2e8f0;
+      border-radius: 16px;
+      margin: 6px 0;
+      font-size: 0.9rem;
+      background: #ffffff;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    .dash-modal-select:focus {
+      outline: none;
+      border-color: #0f766e;
+    }
+
+    .dash-modal-buttons {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .dash-modal-buttons button {
+      flex: 1;
+      padding: 12px;
+      border-radius: 40px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      touch-action: manipulation;
+      min-height: 44px;
+    }
+
+    .dash-modal-buttons button:active {
+      transform: scale(0.96);
+    }
+
+    .dash-modal-buttons .confirm {
+      background: #059669;
+      color: #ffffff;
+    }
+
+    .dash-modal-buttons .cancel {
+      background: #e2e8f0;
+      color: #475569;
+    }
+
+    /* ===== LOADING ===== */
+    .dash-loading {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      height: -webkit-fill-available;
+      background: rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 20000;
+    }
+
+    .dash-loading.active {
+      display: flex;
+    }
+
+    .dash-loading-content {
+      text-align: center;
+      background: rgba(255, 255, 255, 0.1);
+      padding: 28px 40px;
+      border-radius: 28px;
+      animation: dashFadeInUp 0.3s ease;
+    }
+
+    .dash-loading-content i {
+      font-size: 48px;
+      color: #10b981;
+      display: block;
+      margin-bottom: 12px;
+      animation: dashSpin 1s linear infinite;
+    }
+
+    .dash-loading-content p {
+      font-size: 16px;
+      font-weight: 600;
+      color: #ffffff;
+    }
+
+    @keyframes dashFadeInUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes dashSpin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* ===== TOAST ===== */
+    #dash_toast {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1e293b;
+      color: #ffffff;
+      padding: 10px 20px;
+      border-radius: 50px;
+      font-size: 0.8rem;
+      z-index: 1001;
+      display: none;
+      white-space: normal;
+      max-width: 90vw;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+      pointer-events: none;
+    }
+
+    #dash_toast.success { background: #10b981; }
+    #dash_toast.error { background: #ef4444; }
+    #dash_toast.warning { background: #f59e0b; }
+
+    /* ===== RESPONSIVE ===== */
+    @media (max-width: 768px) {
+      body {
+        padding: 8px;
+      }
+      .dashboard-header {
+        flex-direction: column;
+        text-align: center;
+        padding: 12px 16px;
+        border-radius: 20px;
+      }
+      .dashboard-header h1 {
+        font-size: 1.1rem;
+      }
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+      }
+      .stat-card {
+        padding: 12px;
+      }
+      .stat-icon {
+        width: 40px;
+        height: 40px;
+        font-size: 18px;
+        border-radius: 12px;
+      }
+      .stat-info .number {
+        font-size: 1.3rem;
+      }
+      .stat-info h3 {
+        font-size: 0.55rem;
+      }
+      .chart-row {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      .chart-wrapper {
+        height: 220px;
+      }
+      .comparison-header {
+        flex-direction: column;
+        text-align: center;
+        padding: 12px 16px;
+      }
+      .tab-switch button {
+        font-size: 0.65rem;
+        padding: 4px 10px;
+        min-height: 26px;
+      }
+      .filter-bar {
+        flex-direction: column;
+        padding: 10px 12px;
+      }
+      .filter-bar input,
+      .filter-bar select,
+      .filter-bar button {
+        width: 100%;
+        min-width: auto;
+      }
+      .comparison-table th,
+      .comparison-table td {
+        padding: 6px 6px;
+        font-size: 0.65rem;
+      }
+      .comparison-table {
+        min-width: 600px;
+      }
+      .excel-filter-popup {
+        width: calc(100% - 40px);
+        left: 20px !important;
+        right: 20px;
+      }
+      .dash-modal-content {
+        padding: 20px 16px;
+      }
+      .date-picker-area {
+        width: 100%;
+        justify-content: center;
+      }
+      .date-picker-area input {
+        font-size: 0.75rem;
+        padding: 4px 10px;
+      }
+      .date-picker-area button {
+        font-size: 0.75rem;
+        padding: 4px 14px;
+        min-height: 30px;
+      }
+    }
+
+    @media (max-width: 550px) {
+      .stats-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      .stat-card {
+        padding: 10px 14px;
+      }
+      .stat-icon {
+        width: 36px;
+        height: 36px;
+        font-size: 16px;
+      }
+      .stat-info .number {
+        font-size: 1.1rem;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .dashboard-header h1 {
+        font-size: 0.95rem;
+      }
+      .dashboard-header h1 i {
+        font-size: 1.1rem;
+      }
+      .comparison-table th,
+      .comparison-table td {
+        padding: 4px 4px;
+        font-size: 0.6rem;
+      }
+      .comparison-table {
+        min-width: 500px;
+      }
+      .chart-wrapper {
+        height: 180px;
+      }
+      .chart-card {
+        padding: 12px;
+      }
+      .chart-card h3 {
+        font-size: 0.8rem;
+      }
+      .dash-modal-content h3 {
+        font-size: 0.95rem;
+      }
+      .dash-modal-select {
+        font-size: 0.8rem;
+        padding: 10px 12px;
+      }
+      .dash-modal-buttons button {
+        padding: 10px;
+        min-height: 38px;
+        font-size: 0.8rem;
+      }
+    }
+
+    @media (max-width: 380px) {
+      .dashboard-header h1 {
+        font-size: 0.8rem;
+      }
+      .comparison-table th,
+      .comparison-table td {
+        font-size: 0.55rem;
+        padding: 3px 3px;
+      }
+      .comparison-table {
+        min-width: 420px;
+      }
+      .stat-info .number {
+        font-size: 1rem;
+      }
+      .stat-info h3 {
+        font-size: 0.5rem;
+      }
+      .stat-icon {
+        width: 32px;
+        height: 32px;
+        font-size: 14px;
+      }
+    }
+
+    @media (max-height: 600px) {
+      .dashboard-header {
+        padding: 10px 14px;
+        margin-bottom: 12px;
+      }
+      .dashboard-header h1 {
+        font-size: 1rem;
+      }
+      .stats-grid {
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .stat-card {
+        padding: 8px 12px;
+      }
+      .stat-icon {
+        width: 34px;
+        height: 34px;
+        font-size: 16px;
+      }
+      .stat-info .number {
+        font-size: 1.1rem;
+      }
+      .chart-wrapper {
+        height: 160px;
+      }
+      .table-container {
+        max-height: 300px;
+      }
+      .comparison-table th,
+      .comparison-table td {
+        padding: 4px 6px;
+      }
+    }
+
+    .dash-hidden {
+      display: none !important;
+    }
+
+    .dash-text-center {
+      text-align: center;
+    }
+
+    .dash-w-full {
+      width: 100%;
+    }
+
+    .dash-mt-8 {
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+<div class="dashboard-container">
+  <!-- ===== HEADER ===== -->
+  <div class="dashboard-header">
+    <h1><i class="fas fa-chart-line"></i> BẢNG ĐIỀU KHIỂN TUYỂN DỤNG</h1>
+    <div class="date-picker-area">
+      <input type="date" id="dash_date" value="">
+      <button id="dash_refreshBtn"><i class="fas fa-sync-alt"></i> Xem ngày</button>
+    </div>
+  </div>
+
+  <!-- ===== STATS ===== -->
+  <div class="stats-grid" id="statsGrid">
+    <div class="stat-card">
+      <div class="stat-icon app1"><i class="fas fa-id-card"></i></div>
+      <div class="stat-info">
+        <h3>APP 1 - Phỏng vấn</h3>
+        <div class="number" id="stat_app1">--</div>
+        <div class="unit">hồ sơ</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon app2"><i class="fas fa-qrcode"></i></div>
+      <div class="stat-info">
+        <h3>APP 2 - Scan ID</h3>
+        <div class="number" id="stat_app2">--</div>
+        <div class="unit">hồ sơ</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon app3"><i class="fas fa-map-marked-alt"></i></div>
+      <div class="stat-info">
+        <h3>APP 3 - Sau PV</h3>
+        <div class="number" id="stat_app3">--</div>
+        <div class="unit">hồ sơ</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon app4"><i class="fas fa-database"></i></div>
+      <div class="stat-info">
+        <h3>APP 4 - Dự bị</h3>
+        <div class="number" id="stat_app4">--</div>
+        <div class="unit">hồ sơ</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon complete"><i class="fas fa-check-double"></i></div>
+      <div class="stat-info">
+        <h3>HOÀN THÀNH (1+2+3)</h3>
+        <div class="number" id="stat_complete">--</div>
+        <div class="unit">ứng viên</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== CHARTS ===== -->
+  <div class="chart-row">
+    <div class="chart-card">
+      <h3><i class="fas fa-chart-bar"></i> Số lượng hồ sơ theo app</h3>
+      <div class="chart-wrapper">
+        <canvas id="barChart"></canvas>
+      </div>
+    </div>
+    <div class="chart-card">
+      <h3><i class="fas fa-chart-pie"></i> Tỉ lệ hoàn thành</h3>
+      <div class="chart-wrapper">
+        <canvas id="pieChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== COMPARISON TABLE ===== -->
+  <div class="comparison-card">
+    <div class="comparison-header">
+      <h2><i class="fas fa-clipboard-list"></i> DANH SÁCH ỨNG VIÊN</h2>
+      <div class="tab-switch">
+        <button class="tab-btn-compare active" data-tab="passed">🎯 ĐẬU (1+2+3)</button>
+        <button class="tab-btn-compare" data-tab="dubi">📋 DỰ BỊ (1+4)</button>
+      </div>
+    </div>
+
+    <div class="filter-bar">
+      <input type="text" id="compare_search" placeholder="🔍 Tìm kiếm (CCCD, họ tên)...">
+      <select id="compare_filter_status">
+        <option value="all">📋 Tất cả trạng thái</option>
+        <option value="missing">⚠️ Thiếu thông tin</option>
+        <option value="done">✅ Hoàn thành</option>
+      </select>
+      <button id="compare_exportBtn" class="btn-export"><i class="fas fa-file-excel"></i> Xuất DS này</button>
+      <button id="exportMasterBtn" class="btn-export-master"><i class="fas fa-database"></i> Xuất NHẬP HỒ SƠ</button>
+      <button id="clearAllFiltersBtn" class="btn-clear"><i class="fas fa-trash-alt"></i> Xóa filter</button>
+    </div>
+
+    <div class="table-container">
+      <table class="comparison-table" id="comparisonTable">
+        <thead id="tableHeader">
+          <tr>
+            <th data-field="stt" data-type="number">STT <i class="fas fa-sort"></i><span class="filter-icon" data-field="stt"><i class="fas fa-filter"></i></span></th>
+            <th data-field="cccd" data-type="string">CCCD <i class="fas fa-sort"></i><span class="filter-icon" data-field="cccd"><i class="fas fa-filter"></i></span></th>
+            <th data-field="hoTen" data-type="string">Họ tên <i class="fas fa-sort"></i><span class="filter-icon" data-field="hoTen"><i class="fas fa-filter"></i></span></th>
+            <th data-field="app1" data-type="boolean">App 1 <i class="fas fa-sort"></i><span class="filter-icon" data-field="app1"><i class="fas fa-filter"></i></span></th>
+            <th data-field="app2" data-type="boolean">App 2 <i class="fas fa-sort"></i><span class="filter-icon" data-field="app2"><i class="fas fa-filter"></i></span></th>
+            <th data-field="app3" data-type="boolean">App 3 <i class="fas fa-sort"></i><span class="filter-icon" data-field="app3"><i class="fas fa-filter"></i></span></th>
+            <th data-field="app4" data-type="boolean">App 4 <i class="fas fa-sort"></i><span class="filter-icon" data-field="app4"><i class="fas fa-filter"></i></span></th>
+            <th data-field="status" data-type="string">Trạng thái <i class="fas fa-sort"></i><span class="filter-icon" data-field="status"><i class="fas fa-filter"></i></span></th>
+          </tr>
+        </thead>
+        <tbody id="comparisonTableBody">
+          <tr><td colspan="8" style="text-align:center;padding:20px;">Đang tải dữ liệu...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ===== EXPORT MASTER MODAL ===== -->
+<div id="exportMasterModal" class="dash-modal">
+  <div class="dash-modal-content">
+    <h3><i class="fas fa-database"></i> Xuất dữ liệu NHẬP HỒ SƠ</h3>
+    <select id="exportMasterType" class="dash-modal-select">
+      <option value="all">📂 Tất cả dữ liệu</option>
+      <option value="date">📆 Chọn ngày phỏng vấn</option>
+      <option value="month">📊 Chọn tháng</option>
+      <option value="year">🗓️ Chọn năm</option>
+    </select>
+    <input type="date" id="exportMasterDate" class="dash-modal-select" style="display:none;">
+    <select id="exportMasterMonth" class="dash-modal-select" style="display:none;">
+      <option value="01">Tháng 1</option>
+      <option value="02">Tháng 2</option>
+      <option value="03">Tháng 3</option>
+      <option value="04">Tháng 4</option>
+      <option value="05">Tháng 5</option>
+      <option value="06">Tháng 6</option>
+      <option value="07">Tháng 7</option>
+      <option value="08">Tháng 8</option>
+      <option value="09">Tháng 9</option>
+      <option value="10">Tháng 10</option>
+      <option value="11">Tháng 11</option>
+      <option value="12">Tháng 12</option>
+    </select>
+    <select id="exportMasterYear" class="dash-modal-select" style="display:none;"></select>
+    <div class="dash-modal-buttons">
+      <button class="cancel" onclick="closeExportMasterModal()">Hủy</button>
+      <button class="confirm" onclick="confirmExportMaster()">Xuất file</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== LOADING ===== -->
+<div class="dash-loading" id="dashLoading">
+  <div class="dash-loading-content">
+    <i class="fas fa-circle-notch fa-spin"></i>
+    <p>ĐANG TẢI DỮ LIỆU...</p>
+  </div>
+</div>
+
+<!-- ===== TOAST ===== -->
+<div id="dash_toast"></div>
+
+<script>
+  // ============================================================
+  // DASHBOARD - BẢNG ĐIỀU KHIỂN THỐNG KÊ
+  // BẢN TỐI ƯU ĐA THIẾT BỊ - HOÀN CHỈNH
+  // ============================================================
+
+  // ===== LẤY SESSION TOKEN TỪ INDEX =====
+  function getSessionToken() {
+    return window.getCurrentSessionToken ? window.getCurrentSessionToken() : null;
+  }
+
+  // ===== PHÁT HIỆN THIẾT BỊ =====
+  var dashUA = navigator.userAgent ? navigator.userAgent.toLowerCase() : '';
+  var dashIsIOS = /iphone|ipad|ipod/.test(dashUA);
+  var dashIsAndroid = /android/.test(dashUA);
+  var dashIsMobile = dashIsIOS || dashIsAndroid || /Mobi/i.test(dashUA);
+
+  // ===== BIẾN TOÀN CỤC =====
+  var dashCurrentData = {
+    comparisonPass: [],
+    comparisonDuBi: [],
+    counts: { app1: 0, app2: 0, app3: 0, app4: 0, completedPass: 0 }
+  };
+  var dashCurrentTab = 'passed';
+  var dashBarChart = null;
+  var dashPieChart = null;
+  var dashCurrentSort = { field: 'stt', direction: 'asc' };
+  var dashColumnFilters = {};
+  var dashActiveFilterPopup = null;
+
+  // ===== HÀM HIỂN THỊ =====
+  function dashShowToast(message, type) {
+    var toast = document.getElementById('dash_toast');
+    if (!toast) return;
+    toast.textContent = message;
+    toast.className = '';
+    if (type === 'success') toast.classList.add('success');
+    else if (type === 'error') toast.classList.add('error');
+    else if (type === 'warning') toast.classList.add('warning');
+    toast.style.display = 'block';
+    setTimeout(function() {
+      toast.style.display = 'none';
+    }, 4000);
+  }
+
+  function dashShowLoading(show) {
+    var loader = document.getElementById('dashLoading');
+    if (!loader) return;
+    if (show) {
+      loader.classList.add('active');
+    } else {
+      loader.classList.remove('active');
+    }
+  }
+
+  // ===== HELPER FUNCTIONS =====
+  function dashFormatDateToYYYYMMDD(date) {
+    var d = new Date(date);
+    var year = d.getFullYear();
+    var month = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return year + '-' + month + '-' + day;
+  }
+
+  function dashEscapeHtml(str) {
+    if (!str) return '';
+    return String(str).replace(/[&<>]/g, function(m) {
+      if (m === '&') return '&amp;';
+      if (m === '<') return '&lt;';
+      if (m === '>') return '&gt;';
+      return m;
+    });
+  }
+
+  function dashGetItemValue(item, field, idx) {
+    if (field === 'stt') return idx + 1;
+    if (field === 'app1') return item.hasApp1 ? 'Có' : 'Không';
+    if (field === 'app2') return item.hasApp2 ? 'Có' : 'Không';
+    if (field === 'app3') return item.hasApp3 ? 'Có' : 'Không';
+    if (field === 'app4') return item.hasApp4 ? 'Có' : 'Không';
+    if (field === 'status') return item.isComplete ? 'Hoàn thành' : 'Thiếu';
+    if (field === 'cccd') return item.cccd || '';
+    if (field === 'hoTen') return item.hoTen || '';
+    return '';
+  }
+
+  // ===== LOAD DATA =====
+  function dashLoadDashboardData() {
+    dashShowLoading(true);
+    var selectedDate = document.getElementById('dash_date').value;
+    if (!selectedDate) {
+      var today = new Date();
+      selectedDate = dashFormatDateToYYYYMMDD(today);
+      document.getElementById('dash_date').value = selectedDate;
+    }
+
+    try {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          dashShowLoading(false);
+          if (result && result.success) {
+            dashCurrentData = result;
+            dashUpdateStatsAndCharts(result);
+            dashRenderComparisonTable();
+          } else if (result && result.error) {
+            dashShowToast('Lỗi: ' + result.error, 'error');
+          } else {
+            dashShowToast('Lỗi tải dữ liệu', 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          dashShowLoading(false);
+          dashShowToast('Lỗi kết nối: ' + error.message, 'error');
+        })
+        .getDashboardData(selectedDate);
+    } catch (error) {
+      dashShowLoading(false);
+      dashShowToast('Lỗi: ' + error.message, 'error');
+    }
+  }
+
+  // ===== UPDATE STATS AND CHARTS =====
+  function dashUpdateStatsAndCharts(data) {
+    // Update stats
+    document.getElementById('stat_app1').textContent = data.counts.app1 || 0;
+    document.getElementById('stat_app2').textContent = data.counts.app2 || 0;
+    document.getElementById('stat_app3').textContent = data.counts.app3 || 0;
+    document.getElementById('stat_app4').textContent = data.counts.app4 || 0;
+    document.getElementById('stat_complete').textContent = data.counts.completedPass || 0;
+
+    // Bar chart
+    if (dashBarChart) dashBarChart.destroy();
+    var ctxBar = document.getElementById('barChart').getContext('2d');
+    var barData = [data.counts.app1 || 0, data.counts.app2 || 0, data.counts.app3 || 0, data.counts.app4 || 0];
+    dashBarChart = new Chart(ctxBar, {
+      type: 'bar',
+      data: {
+        labels: ['App 1\n(Phỏng vấn)', 'App 2\n(Scan ID)', 'App 3\n(Sau PV)', 'App 4\n(Dự bị)'],
+        datasets: [{
+          label: 'Số hồ sơ',
+          data: barData,
+          backgroundColor: ['#11998e', '#4facfe', '#fa709a', '#059669'],
+          borderRadius: 6,
+          borderWidth: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+          legend: {
+            position: 'top',
+            labels: { font: { size: 10, weight: '600' }, boxWidth: 12 }
+          },
+          tooltip: {
+            callbacks: {
+              label: function(context) {
+                return context.raw + ' hồ sơ';
+              }
+            }
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: { stepSize: 1, precision: 0, font: { size: 9 } }
+          },
+          x: {
+            ticks: { font: { size: 9 } }
+          }
+        }
+      }
+    });
+
+    // Pie chart
+    var totalPass = data.counts.app1 || 0;
+    var completedPass = data.counts.completedPass || 0;
+    if (dashPieChart) dashPieChart.destroy();
+    var ctxPie = document.getElementById('pieChart').getContext('2d');
+    var remaining = Math.max(0, totalPass - completedPass);
+    dashPieChart = new Chart(ctxPie, {
+      type: 'doughnut',
+      data: {
+        labels: ['Đã hoàn thành (App 1+2+3)', 'Chưa hoàn thành'],
+        datasets: [{
+          data: [completedPass, remaining],
+          backgroundColor: ['#10b981', '#f97316'],
+          borderWidth: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: { font: { size: 10, weight: '600' }, boxWidth: 12 }
+          },
+          tooltip: {
+            callbacks: {
+              label: function(context) {
+                var total = completedPass + remaining;
+                var percent = total > 0 ? Math.round(context.raw / total * 100) : 0;
+                return context.raw + ' ứng viên (' + percent + '%)';
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // ===== GET DATA SOURCE =====
+  function dashGetDataSource() {
+    if (dashCurrentTab === 'passed') {
+      return dashCurrentData.comparisonPass || [];
+    } else {
+      return dashCurrentData.comparisonDuBi || [];
+    }
+  }
+
+  // ===== APPLY FILTERS AND SORT =====
+  function dashApplyFiltersAndSort(dataSource) {
+    var searchTerm = document.getElementById('compare_search').value.toLowerCase();
+    var filterStatus = document.getElementById('compare_filter_status').value;
+
+    var filtered = [];
+    for (var i = 0; i < dataSource.length; i++) {
+      var item = dataSource[i];
+      var matchSearch = (item.cccd || '').toLowerCase().indexOf(searchTerm) !== -1 ||
+                        (item.hoTen || '').toLowerCase().indexOf(searchTerm) !== -1;
+      if (!matchSearch) continue;
+
+      if (filterStatus === 'missing' && item.isComplete) continue;
+      if (filterStatus === 'done' && !item.isComplete) continue;
+
+      var filterMatch = true;
+      for (var field in dashColumnFilters) {
+        if (dashColumnFilters.hasOwnProperty(field) && dashColumnFilters[field]) {
+          var itemValue = dashGetItemValue(item, field, i);
+          if (typeof itemValue === 'string') {
+            if (itemValue.toLowerCase().indexOf(dashColumnFilters[field].toLowerCase()) === -1) {
+              filterMatch = false;
+              break;
+            }
+          } else {
+            if (String(itemValue).toLowerCase() !== dashColumnFilters[field].toLowerCase()) {
+              filterMatch = false;
+              break;
+            }
+          }
+        }
+      }
+      if (!filterMatch) continue;
+
+      filtered.push(item);
+    }
+
+    // Sort
+    filtered.sort(function(a, b) {
+      var aIdx = dataSource.indexOf(a);
+      var bIdx = dataSource.indexOf(b);
+      var aVal = dashGetItemValue(a, dashCurrentSort.field, aIdx);
+      var bVal = dashGetItemValue(b, dashCurrentSort.field, bIdx);
+      if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+      if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+      if (dashCurrentSort.direction === 'asc') {
+        return aVal > bVal ? 1 : (aVal < bVal ? -1 : 0);
+      } else {
+        return aVal < bVal ? 1 : (aVal > bVal ? -1 : 0);
+      }
+    });
+
+    return filtered;
+  }
+
+  // ===== RENDER COMPARISON TABLE =====
+  function dashRenderComparisonTable() {
+    var tbody = document.getElementById('comparisonTableBody');
+    var dataSource = dashGetDataSource();
+
+    if (!dataSource || dataSource.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;">📭 Không có dữ liệu ứng viên trong ngày</td></tr>';
+      return;
+    }
+
+    var filtered = dashApplyFiltersAndSort(dataSource);
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;">🔍 Không tìm thấy kết quả phù hợp</td></tr>';
+      return;
+    }
+
+    var html = '';
+    for (var i = 0; i < filtered.length; i++) {
+      var item = filtered[i];
+      var actualIndex = dataSource.indexOf(item);
+      var statusHtml = '';
+      if (item.isComplete) {
+        statusHtml = '<span class="status-badge status-done"><i class="fas fa-check-circle"></i> Hoàn thành</span>';
+      } else {
+        var missing = [];
+        if (dashCurrentTab === 'passed') {
+          if (!item.hasApp1) missing.push('App1');
+          if (!item.hasApp2) missing.push('App2');
+          if (!item.hasApp3) missing.push('App3');
+        } else {
+          if (!item.hasApp1) missing.push('App1');
+          if (!item.hasApp4) missing.push('App4');
+        }
+        statusHtml = '<span class="status-badge status-missing"><i class="fas fa-exclamation-triangle"></i> Thiếu: ' + missing.join(', ') + '</span>';
+      }
+
+      html += '<tr>' +
+        '<td>' + (actualIndex + 1) + '</td>' +
+        '<td>' + dashEscapeHtml(item.cccd || '--') + '</td>' +
+        '<td>' + dashEscapeHtml(item.hoTen || '--') + '</td>' +
+        '<td class="text-center">' + (item.hasApp1 ? '<i class="fas fa-check-circle status-icon-check"></i>' : '<i class="fas fa-times-circle status-icon-times"></i>') + '</td>' +
+        '<td class="text-center">' + (item.hasApp2 ? '<i class="fas fa-check-circle status-icon-check"></i>' : '<i class="fas fa-times-circle status-icon-times"></i>') + '</td>' +
+        '<td class="text-center">' + (item.hasApp3 ? '<i class="fas fa-check-circle status-icon-check"></i>' : '<i class="fas fa-times-circle status-icon-times"></i>') + '</td>' +
+        '<td class="text-center">' + (item.hasApp4 ? '<i class="fas fa-check-circle status-icon-check"></i>' : '<i class="fas fa-times-circle status-icon-times"></i>') + '</td>' +
+        '<td>' + statusHtml + '</td>' +
+        '</tr>';
+    }
+    tbody.innerHTML = html;
+
+    dashUpdateSortIcons();
+    dashUpdateFilterIcons();
+  }
+
+  // ===== UPDATE SORT ICONS =====
+  function dashUpdateSortIcons() {
+    var headers = document.querySelectorAll('#tableHeader th');
+    for (var i = 0; i < headers.length; i++) {
+      var th = headers[i];
+      var field = th.getAttribute('data-field');
+      var icon = th.querySelector('i.fa-sort');
+      if (icon) {
+        icon.className = 'fas fa-sort';
+        if (dashCurrentSort.field === field) {
+          icon.className = dashCurrentSort.direction === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down';
+        }
+      }
+    }
+  }
+
+  // ===== UPDATE FILTER ICONS =====
+  function dashUpdateFilterIcons() {
+    var icons = document.querySelectorAll('#tableHeader th .filter-icon');
+    for (var i = 0; i < icons.length; i++) {
+      var icon = icons[i];
+      var field = icon.getAttribute('data-field');
+      if (dashColumnFilters[field]) {
+        icon.classList.add('filter-active');
+      } else {
+        icon.classList.remove('filter-active');
+      }
+    }
+  }
+
+  // ===== SORT TABLE =====
+  function dashSortTable(field) {
+    if (dashCurrentSort.field === field) {
+      dashCurrentSort.direction = dashCurrentSort.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+      dashCurrentSort.field = field;
+      dashCurrentSort.direction = 'asc';
+    }
+    dashRenderComparisonTable();
+  }
+
+  // ===== FILTER POPUP =====
+  function dashCloseFilterPopup() {
+    if (dashActiveFilterPopup) {
+      dashActiveFilterPopup.remove();
+      dashActiveFilterPopup = null;
+    }
+  }
+
+  function dashShowFilterPopup(field, thElement) {
+    event.stopPropagation();
+    dashCloseFilterPopup();
+
+    var rect = thElement.getBoundingClientRect();
+    var popup = document.createElement('div');
+    popup.className = 'excel-filter-popup';
+    popup.style.top = (rect.bottom + window.scrollY + 5) + 'px';
+    popup.style.left = (rect.left + window.scrollX) + 'px';
+
+    var currentValue = dashColumnFilters[field] || '';
+    var fieldName = thElement.innerText.trim().split(' ')[0];
+
+    popup.innerHTML = '<div class="filter-header">' +
+      '<span><i class="fas fa-filter"></i> Lọc theo: ' + fieldName + '</span>' +
+      '<span class="close-filter" onclick="dashCloseFilterPopup()"><i class="fas fa-times"></i></span>' +
+      '</div>' +
+      '<div class="filter-body">' +
+      '<div class="filter-input-group">' +
+      '<label><i class="fas fa-search"></i> Nhập giá trị cần lọc</label>' +
+      '<input type="text" id="filter_value_input" placeholder="Ví dụ: ' + (field === 'status' ? 'Hoàn thành' : (field === 'app1' ? 'Có' : '...')) + '" value="' + dashEscapeHtml(currentValue) + '" autocomplete="off">' +
+      '</div>' +
+      '<div class="filter-actions">' +
+      '<button class="btn-apply" onclick="dashApplyFilter(\'' + field + '\')"><i class="fas fa-check"></i> Áp dụng</button>' +
+      '<button class="btn-clear" onclick="dashClearFilter(\'' + field + '\')"><i class="fas fa-eraser"></i> Xóa</button>' +
+      '</div>' +
+      '<div class="filter-hint"><i class="fas fa-info-circle"></i> Lọc theo nội dung chứa từ khóa</div>' +
+      '</div>';
+
+    document.body.appendChild(popup);
+    dashActiveFilterPopup = popup;
+
+    var input = popup.querySelector('#filter_value_input');
+    input.focus();
+    input.select();
+  }
+
+  function dashApplyFilter(field) {
+    var input = document.getElementById('filter_value_input');
+    if (input && input.value.trim()) {
+      dashColumnFilters[field] = input.value.trim();
+    } else {
+      delete dashColumnFilters[field];
+    }
+    dashCloseFilterPopup();
+    dashRenderComparisonTable();
+  }
+
+  function dashClearFilter(field) {
+    delete dashColumnFilters[field];
+    dashCloseFilterPopup();
+    dashRenderComparisonTable();
+  }
+
+  function dashClearAllFilters() {
+    dashColumnFilters = {};
+    document.getElementById('compare_search').value = '';
+    document.getElementById('compare_filter_status').value = 'all';
+    dashRenderComparisonTable();
+  }
+
+  // ===== EXPORT =====
+  function dashExportToExcel() {
+    var dataSource = dashGetDataSource();
+    if (!dataSource || dataSource.length === 0) {
+      dashShowToast('Không có dữ liệu để xuất', 'warning');
+      return;
+    }
+
+    var exportData = [];
+    for (var i = 0; i < dataSource.length; i++) {
+      var item = dataSource[i];
+      exportData.push({
+        'STT': i + 1,
+        'CCCD': item.cccd || '--',
+        'Họ tên': item.hoTen || '--',
+        'App 1 (Phỏng vấn)': item.hasApp1 ? 'Đã nhập' : 'Chưa nhập',
+        'App 2 (Scan ID - Đậu)': item.hasApp2 ? 'Đã nhập' : 'Chưa nhập',
+        'App 3 (Sau phỏng vấn)': item.hasApp3 ? 'Đã nhập' : 'Chưa nhập',
+        'App 4 (Dự bị)': item.hasApp4 ? 'Đã nhập' : 'Chưa nhập',
+        'Trạng thái': item.isComplete ? 'Hoàn thành' : 'Chưa hoàn thành'
+      });
+    }
+
+    try {
+      var ws = XLSX.utils.json_to_sheet(exportData);
+      var wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Danh_sach_doi_chieu');
+      var fileName = 'danh_sach_' + dashCurrentTab + '_' + document.getElementById('dash_date').value + '.xlsx';
+      XLSX.writeFile(wb, fileName);
+      dashShowToast('Đã xuất file thành công!', 'success');
+    } catch (error) {
+      dashShowToast('Lỗi xuất: ' + error.message, 'error');
+    }
+  }
+
+  // ===== EXPORT MASTER =====
+  function openExportMasterModal() {
+    document.getElementById('exportMasterModal').classList.add('active');
+    dashUpdateMasterYearSelect();
+  }
+
+  function closeExportMasterModal() {
+    document.getElementById('exportMasterModal').classList.remove('active');
+  }
+
+  function dashUpdateMasterYearSelect() {
+    var yearSelect = document.getElementById('exportMasterYear');
+    if (!yearSelect) return;
+
+    try {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          yearSelect.innerHTML = '';
+          if (result.success && result.years && result.years.length > 0) {
+            for (var i = 0; i < result.years.length; i++) {
+              var opt = document.createElement('option');
+              opt.value = result.years[i];
+              opt.textContent = result.years[i];
+              yearSelect.appendChild(opt);
+            }
+          } else {
+            var currentYear = new Date().getFullYear();
+            for (var y = 2020; y <= currentYear + 1; y++) {
+              var opt = document.createElement('option');
+              opt.value = y;
+              opt.textContent = y;
+              yearSelect.appendChild(opt);
+            }
+          }
+        })
+        .withFailureHandler(function() {
+          var currentYear = new Date().getFullYear();
+          yearSelect.innerHTML = '';
+          for (var y = 2020; y <= currentYear + 1; y++) {
+            var opt = document.createElement('option');
+            opt.value = y;
+            opt.textContent = y;
+            yearSelect.appendChild(opt);
+          }
+        })
+        .getAvailableYearsInMaster();
+    } catch (error) {
+      var currentYear = new Date().getFullYear();
+      yearSelect.innerHTML = '';
+      for (var y = 2020; y <= currentYear + 1; y++) {
+        var opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = y;
+        yearSelect.appendChild(opt);
+      }
+    }
+  }
+
+  function confirmExportMaster() {
+    var type = document.getElementById('exportMasterType').value;
+    var filterType = '';
+    var filterValue = '';
+
+    if (type === 'all') {
+      filterType = 'all';
+      filterValue = '';
+    } else if (type === 'date') {
+      filterType = 'date';
+      var dateVal = document.getElementById('exportMasterDate').value;
+      if (!dateVal) {
+        dashShowToast('Vui lòng chọn ngày', 'warning');
+        return;
+      }
+      var parts = dateVal.split('-');
+      filterValue = parts[2] + '/' + parts[1] + '/' + parts[0];
+    } else if (type === 'month') {
+      filterType = 'month';
+      var month = document.getElementById('exportMasterMonth').value;
+      var year = document.getElementById('exportMasterYear').value;
+      if (!year) {
+        dashShowToast('Vui lòng chọn năm', 'warning');
+        return;
+      }
+      filterValue = month + '/' + year;
+    } else if (type === 'year') {
+      filterType = 'year';
+      filterValue = document.getElementById('exportMasterYear').value;
+      if (!filterValue) {
+        dashShowToast('Vui lòng chọn năm', 'warning');
+        return;
+      }
+    }
+
+    closeExportMasterModal();
+    dashShowLoading(true);
+    var sessionToken = getSessionToken();
+
+    try {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          dashShowLoading(false);
+          if (result && result.success && result.fileBase64) {
+            var byteCharacters = atob(result.fileBase64);
+            var byteNumbers = new Array(byteCharacters.length);
+            for (var i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            var byteArray = new Uint8Array(byteNumbers);
+            var blob = new Blob([byteArray], { type: 'application/vnd.ms-excel' });
+
+            var link = document.createElement('a');
+            var url = URL.createObjectURL(blob);
+            link.href = url;
+            link.setAttribute('download', result.fileName || 'NHAP_HO_SO.xls');
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            dashShowToast('Đã xuất ' + (result.rowCount || 0) + ' dòng dữ liệu!', 'success');
+          } else {
+            dashShowToast((result && result.error) ? result.error : 'Không có dữ liệu để xuất', 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          dashShowLoading(false);
+          dashShowToast('Lỗi xuất: ' + error.message, 'error');
+        })
+        .exportMasterSheetToExcel(filterType, filterValue, sessionToken);
+    } catch (error) {
+      dashShowLoading(false);
+      dashShowToast('Lỗi: ' + error.message, 'error');
+    }
+  }
+
+  // ===== EXPORT TYPE CHANGE =====
+  document.getElementById('exportMasterType').addEventListener('change', function() {
+    var type = this.value;
+    document.getElementById('exportMasterDate').style.display = type === 'date' ? 'block' : 'none';
+    document.getElementById('exportMasterMonth').style.display = type === 'month' ? 'block' : 'none';
+    document.getElementById('exportMasterYear').style.display = type === 'year' ? 'block' : 'none';
+  });
+
+  // ===== SETUP EVENT LISTENERS =====
+  function dashSetupEventListeners() {
+    // Refresh
+    document.getElementById('dash_refreshBtn').addEventListener('click', dashLoadDashboardData);
+
+    // Export
+    document.getElementById('compare_exportBtn').addEventListener('click', dashExportToExcel);
+    document.getElementById('exportMasterBtn').addEventListener('click', openExportMasterModal);
+
+    // Clear filters
+    document.getElementById('clearAllFiltersBtn').addEventListener('click', dashClearAllFilters);
+
+    // Search and filter
+    document.getElementById('compare_search').addEventListener('input', dashRenderComparisonTable);
+    document.getElementById('compare_filter_status').addEventListener('change', dashRenderComparisonTable);
+
+    // Tab switching
+    var tabBtns = document.querySelectorAll('.tab-btn-compare');
+    for (var i = 0; i < tabBtns.length; i++) {
+      tabBtns[i].addEventListener('click', function() {
+        dashCurrentTab = this.getAttribute('data-tab');
+        for (var j = 0; j < tabBtns.length; j++) {
+          tabBtns[j].classList.remove('active');
+        }
+        this.classList.add('active');
+        dashColumnFilters = {};
+        dashCurrentSort = { field: 'stt', direction: 'asc' };
+        document.getElementById('compare_search').value = '';
+        document.getElementById('compare_filter_status').value = 'all';
+        dashRenderComparisonTable();
+      });
+    }
+
+    // Table headers for sorting and filtering
+    var headers = document.querySelectorAll('#tableHeader th');
+    for (var i = 0; i < headers.length; i++) {
+      var th = headers[i];
+      var field = th.getAttribute('data-field');
+      if (field) {
+        th.style.cursor = 'pointer';
+        (function(f) {
+          th.addEventListener('click', function(e) {
+            if (!e.target.closest('.filter-icon')) {
+              dashSortTable(f);
+            }
+          });
+        })(field);
+
+        var filterIcon = th.querySelector('.filter-icon');
+        if (filterIcon) {
+          filterIcon.setAttribute('data-field', field);
+          (function(f, t) {
+            filterIcon.addEventListener('click', function(e) {
+              e.stopPropagation();
+              dashShowFilterPopup(f, t);
+            });
+          })(field, th);
+        }
+      }
+    }
+
+    // Enter key on search
+    document.getElementById('compare_search').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        dashRenderComparisonTable();
+      }
+    });
+  }
+
+  // ===== EXPOSE GLOBAL FUNCTIONS =====
+  window.dashCloseFilterPopup = dashCloseFilterPopup;
+  window.dashApplyFilter = dashApplyFilter;
+  window.dashClearFilter = dashClearFilter;
+  window.closeExportMasterModal = closeExportMasterModal;
+  window.confirmExportMaster = confirmExportMaster;
+
+  // ===== INIT =====
+  document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 Dashboard khởi động...');
+    dashSetupEventListeners();
+
+    var today = new Date();
+    document.getElementById('dash_date').value = dashFormatDateToYYYYMMDD(today);
+
+    dashLoadDashboardData();
+    console.log('✅ Dashboard đã sẵn sàng - Tối ưu đa thiết bị');
+  });
+</script>
+</body>
+</html>

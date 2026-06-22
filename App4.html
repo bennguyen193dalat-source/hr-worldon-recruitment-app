@@ -60,7 +60,7 @@
       font-size: 1.5rem;
       font-weight: 800;
       color: #065f46;
-      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -68,7 +68,7 @@
     }
 
     .app4-header p {
-      color: #047857; 
+      color: #047857;
       margin-top: 4px;
       font-size: 0.85rem;
     }
@@ -83,7 +83,7 @@
       margin-top: 8px;
       font-size: 0.85rem;
       font-weight: 600;
-      color: #ffffff;
+      color: #065f46;
     }
 
     .app4-count-badge i {
@@ -813,6 +813,24 @@
     return window.getCurrentSessionToken ? window.getCurrentSessionToken() : null;
   }
 
+  // ===== API CONFIG =====
+  const API_URL = 'https://script.google.com/macros/s/AKfycbwKVrFfGB6DyxpyoU6sAVD-9q2u5P7qe3dO1sPNd4fHdVWT6Eg10fldAkIoPt23Zz2-Mg/exec'; // ⚠️ THAY URL CỦA BẠN
+
+  async function callAPI(action, data, sessionToken = null) {
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action, data: data, sessionToken: sessionToken })
+      });
+      if (!response.ok) throw new Error('HTTP error! status: ' + response.status);
+      return await response.json();
+    } catch (error) {
+      console.error('API Error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   // ===== PHÁT HIỆN THIẾT BỊ =====
   var app4UA = navigator.userAgent ? navigator.userAgent.toLowerCase() : '';
   var app4IsIOS = /iphone|ipad|ipod/.test(app4UA);
@@ -886,25 +904,21 @@
 
   // ===== UPDATE COUNT =====
   function app4UpdateDuBiCount() {
-    try {
-      google.script.run
-        .withSuccessHandler(function(result) {
-          var badge = document.getElementById('app4_countBadge');
-          if (!badge) return;
-          if (result && result.success === true) {
-            badge.innerHTML = '<i class="fas fa-chart-simple"></i> 📋 Hôm nay: ' + result.count + ' ứng viên dự bị';
-          } else {
-            badge.innerHTML = '<i class="fas fa-chart-simple"></i> 📋 Hôm nay: 0';
-          }
-        })
-        .withFailureHandler(function() {
-          var badge = document.getElementById('app4_countBadge');
-          if (badge) badge.innerHTML = '<i class="fas fa-chart-simple"></i> 📋 Hôm nay: --';
-        })
-        .getDuBiCountToday();
-    } catch (error) {
-      console.error('Lỗi lấy số lượng dự bị:', error);
-    }
+    callAPI('getDuBiCountToday', null)
+      .then(function(result) {
+        var badge = document.getElementById('app4_countBadge');
+        if (!badge) return;
+        if (result && result.success === true) {
+          badge.innerHTML = '<i class="fas fa-chart-simple"></i> 📋 Hôm nay: ' + result.count + ' ứng viên dự bị';
+        } else {
+          badge.innerHTML = '<i class="fas fa-chart-simple"></i> 📋 Hôm nay: 0';
+        }
+      })
+      .catch(function(error) {
+        console.error('Lỗi lấy số lượng dự bị:', error);
+        var badge = document.getElementById('app4_countBadge');
+        if (badge) badge.innerHTML = '<i class="fas fa-chart-simple"></i> 📋 Hôm nay: --';
+      });
   }
 
   // ===== DISPLAY CANDIDATE INFO =====
@@ -997,74 +1011,68 @@
     document.getElementById('app4_cccd').value = cccd;
     app4ShowLoading(true);
 
-    try {
-      google.script.run
-        .withSuccessHandler(function(result) {
-          app4ShowLoading(false);
-          if (result && result.success === true) {
-            app4CurrentCandidateData = result.data;
-            app4CurrentCandidateData.cccd = cccd;
+    callAPI('lookupCandidateForDuBi', cccd)
+      .then(function(result) {
+        app4ShowLoading(false);
+        if (result && result.success === true) {
+          app4CurrentCandidateData = result.data;
+          app4CurrentCandidateData.cccd = cccd;
 
-            if (qrData) {
-              if (qrData.hoTen) app4CurrentCandidateData.hoTen = qrData.hoTen;
-              if (qrData.gioiTinh) app4CurrentCandidateData.gioiTinh = qrData.gioiTinh;
-              if (qrData.ngaySinh) app4CurrentCandidateData.ngaySinh = qrData.ngaySinh;
-              if (qrData.ngayCap) app4CurrentCandidateData.ngayCap = qrData.ngayCap;
-              if (qrData.diaChiThuongTru) app4CurrentCandidateData.diaChiThuongTru = qrData.diaChiThuongTru;
-            }
-
-            app4DisplayCandidateInfo(app4CurrentCandidateData);
-            var nameDisplay = app4CurrentCandidateData.hoTen || 'chưa có tên';
-            app4ShowAlert('TÌM THẤY ỨNG VIÊN',
-              'Số CCCD: ' + cccd + '<br>Họ tên: ' + nameDisplay + '<br><br>Vui lòng chọn lý do và lưu vào danh sách dự bị.',
-              'success'
-            );
-            app4ShowToast('Tìm thấy thông tin ứng viên: ' + nameDisplay, 'success');
-          } else {
-            var errorMsg = (result && result.error) ? result.error : 'Không tìm thấy CCCD trong hệ thống phỏng vấn';
-
-            if (qrData && qrData.hoTen) {
-              app4CurrentCandidateData = {
-                cccd: cccd,
-                hoTen: qrData.hoTen || '',
-                queQuan: '',
-                gioiTinh: qrData.gioiTinh || '',
-                danToc: '',
-                tonGiao: '',
-                trinhDo: '',
-                honNhan: '',
-                sdt: '',
-                sdtNguoiThan: '',
-                quanHe: '',
-                ngaySinh: qrData.ngaySinh || '',
-                ngayCap: qrData.ngayCap || '',
-                diaChiThuongTru: qrData.diaChiThuongTru || ''
-              };
-              app4DisplayCandidateInfo(app4CurrentCandidateData);
-              app4ShowAlert('KHÔNG TÌM THẤY TRONG HỆ THỐNG',
-                'Số CCCD: ' + cccd + '<br>Họ tên từ QR: ' + (qrData.hoTen || '--') +
-                '<br><br>CCCD này chưa được nhập thông tin phỏng vấn trong ngày hôm nay.',
-                'warning'
-              );
-              app4ShowToast('CCCD chưa được phỏng vấn trong ngày hôm nay', 'warning');
-            } else {
-              app4ShowAlert('KHÔNG TÌM THẤY CCCD', 'Số CCCD: ' + cccd + '<br><br>' + errorMsg, 'error');
-              app4ShowToast(errorMsg, 'error');
-              document.getElementById('app4_resultCard').style.display = 'none';
-              app4CurrentCandidateData = null;
-            }
+          if (qrData) {
+            if (qrData.hoTen) app4CurrentCandidateData.hoTen = qrData.hoTen;
+            if (qrData.gioiTinh) app4CurrentCandidateData.gioiTinh = qrData.gioiTinh;
+            if (qrData.ngaySinh) app4CurrentCandidateData.ngaySinh = qrData.ngaySinh;
+            if (qrData.ngayCap) app4CurrentCandidateData.ngayCap = qrData.ngayCap;
+            if (qrData.diaChiThuongTru) app4CurrentCandidateData.diaChiThuongTru = qrData.diaChiThuongTru;
           }
-        })
-        .withFailureHandler(function(error) {
-          app4ShowLoading(false);
-          app4ShowAlert('LỖI KẾT NỐI', 'Không thể kết nối đến máy chủ.<br><br>Chi tiết: ' + error.message, 'error');
-          app4ShowToast('Lỗi kết nối: ' + error.message, 'error');
-        })
-        .lookupCandidateForDuBi(cccd);
-    } catch (error) {
-      app4ShowLoading(false);
-      app4ShowAlert('LỖI', error.message, 'error');
-    }
+
+          app4DisplayCandidateInfo(app4CurrentCandidateData);
+          var nameDisplay = app4CurrentCandidateData.hoTen || 'chưa có tên';
+          app4ShowAlert('TÌM THẤY ỨNG VIÊN',
+            'Số CCCD: ' + cccd + '<br>Họ tên: ' + nameDisplay + '<br><br>Vui lòng chọn lý do và lưu vào danh sách dự bị.',
+            'success'
+          );
+          app4ShowToast('Tìm thấy thông tin ứng viên: ' + nameDisplay, 'success');
+        } else {
+          var errorMsg = (result && result.error) ? result.error : 'Không tìm thấy CCCD trong hệ thống phỏng vấn';
+
+          if (qrData && qrData.hoTen) {
+            app4CurrentCandidateData = {
+              cccd: cccd,
+              hoTen: qrData.hoTen || '',
+              queQuan: '',
+              gioiTinh: qrData.gioiTinh || '',
+              danToc: '',
+              tonGiao: '',
+              trinhDo: '',
+              honNhan: '',
+              sdt: '',
+              sdtNguoiThan: '',
+              quanHe: '',
+              ngaySinh: qrData.ngaySinh || '',
+              ngayCap: qrData.ngayCap || '',
+              diaChiThuongTru: qrData.diaChiThuongTru || ''
+            };
+            app4DisplayCandidateInfo(app4CurrentCandidateData);
+            app4ShowAlert('KHÔNG TÌM THẤY TRONG HỆ THỐNG',
+              'Số CCCD: ' + cccd + '<br>Họ tên từ QR: ' + (qrData.hoTen || '--') +
+              '<br><br>CCCD này chưa được nhập thông tin phỏng vấn trong ngày hôm nay.',
+              'warning'
+            );
+            app4ShowToast('CCCD chưa được phỏng vấn trong ngày hôm nay', 'warning');
+          } else {
+            app4ShowAlert('KHÔNG TÌM THẤY CCCD', 'Số CCCD: ' + cccd + '<br><br>' + errorMsg, 'error');
+            app4ShowToast(errorMsg, 'error');
+            document.getElementById('app4_resultCard').style.display = 'none';
+            app4CurrentCandidateData = null;
+          }
+        }
+      })
+      .catch(function(error) {
+        app4ShowLoading(false);
+        app4ShowAlert('LỖI KẾT NỐI', 'Không thể kết nối đến máy chủ.<br><br>Chi tiết: ' + error.message, 'error');
+        app4ShowToast('Lỗi kết nối: ' + error.message, 'error');
+      });
   }
 
   // ===== SAVE TO DU BI =====
@@ -1122,42 +1130,36 @@
 
     var sessionToken = getSessionToken();
 
-    try {
-      google.script.run
-        .withSuccessHandler(function(result) {
-          app4ShowLoading(false);
-          if (result && result.success === true) {
-            app4ShowAlert('LƯU THÀNH CÔNG',
-              result.message + '<br><br>' +
-              '<strong>Ứng viên:</strong> ' + (app4CurrentCandidateData.hoTen || 'Chưa có tên') + '<br>' +
-              '<strong>CCCD:</strong> ' + app4CurrentCandidateData.cccd + '<br>' +
-              '<strong>Lý do:</strong> ' + reason,
-              'success'
-            );
-            app4ShowToast(result.message, 'success');
-            document.getElementById('app4_reason').value = '';
-            document.getElementById('app4_resultCard').style.display = 'none';
-            app4CurrentCandidateData = null;
-            document.getElementById('app4_cccd').value = '';
-            app4UpdateDuBiCount();
-          } else {
-            app4ShowAlert('LƯU THẤT BẠI',
-              (result && result.error) ? result.error : 'Có lỗi xảy ra khi lưu dữ liệu.',
-              'error'
-            );
-            app4ShowToast((result && result.error) ? result.error : 'Lưu thất bại', 'error');
-          }
-        })
-        .withFailureHandler(function(error) {
-          app4ShowLoading(false);
-          app4ShowAlert('LỖI KẾT NỐI', 'Không thể lưu dữ liệu.<br><br>Chi tiết: ' + error.message, 'error');
-          app4ShowToast('Lỗi: ' + error.message, 'error');
-        })
-        .saveToDuBi(dataToSave, sessionToken);
-    } catch (error) {
-      app4ShowLoading(false);
-      app4ShowAlert('LỖI', error.message, 'error');
-    }
+    callAPI('saveToDuBi', dataToSave, sessionToken)
+      .then(function(result) {
+        app4ShowLoading(false);
+        if (result && result.success === true) {
+          app4ShowAlert('LƯU THÀNH CÔNG',
+            result.message + '<br><br>' +
+            '<strong>Ứng viên:</strong> ' + (app4CurrentCandidateData.hoTen || 'Chưa có tên') + '<br>' +
+            '<strong>CCCD:</strong> ' + app4CurrentCandidateData.cccd + '<br>' +
+            '<strong>Lý do:</strong> ' + reason,
+            'success'
+          );
+          app4ShowToast(result.message, 'success');
+          document.getElementById('app4_reason').value = '';
+          document.getElementById('app4_resultCard').style.display = 'none';
+          app4CurrentCandidateData = null;
+          document.getElementById('app4_cccd').value = '';
+          app4UpdateDuBiCount();
+        } else {
+          app4ShowAlert('LƯU THẤT BẠI',
+            (result && result.error) ? result.error : 'Có lỗi xảy ra khi lưu dữ liệu.',
+            'error'
+          );
+          app4ShowToast((result && result.error) ? result.error : 'Lưu thất bại', 'error');
+        }
+      })
+      .catch(function(error) {
+        app4ShowLoading(false);
+        app4ShowAlert('LỖI KẾT NỐI', 'Không thể lưu dữ liệu.<br><br>Chi tiết: ' + error.message, 'error');
+        app4ShowToast('Lỗi: ' + error.message, 'error');
+      });
   }
 
   // ===== RESET FORM =====
@@ -1323,49 +1325,43 @@
     app4CloseExportModal();
     app4ShowLoading(true);
 
-    try {
-      google.script.run
-        .withSuccessHandler(function(result) {
-          app4ShowLoading(false);
-          if (result && result.success && result.fileBase64) {
-            var byteCharacters = atob(result.fileBase64);
-            var byteNumbers = new Array(byteCharacters.length);
-            for (var i = 0; i < byteCharacters.length; i++) {
-              byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }
-            var byteArray = new Uint8Array(byteNumbers);
-            var blob = new Blob([byteArray], { type: 'application/vnd.ms-excel' });
-
-            var link = document.createElement('a');
-            var url = URL.createObjectURL(blob);
-            link.href = url;
-            link.setAttribute('download', result.fileName || ('du_bi_' + filterType + '_' + filterValue.replace(/\//g, '_') + '.xls'));
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-
-            app4ShowAlert('XUẤT DỮ LIỆU',
-              'Đã xuất ' + result.rowCount + ' dòng dữ liệu thành công!',
-              'success'
-            );
-            app4ShowToast('Đã xuất ' + result.rowCount + ' dòng dữ liệu', 'success');
-          } else {
-            app4ShowAlert('XUẤT THẤT BẠI',
-              (result && result.error) ? result.error : 'Không có dữ liệu để xuất',
-              'error'
-            );
+    callAPI('exportDuBiExcel', { filterType: filterType, filterValue: filterValue })
+      .then(function(result) {
+        app4ShowLoading(false);
+        if (result && result.success && result.fileBase64) {
+          var byteCharacters = atob(result.fileBase64);
+          var byteNumbers = new Array(byteCharacters.length);
+          for (var i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
           }
-        })
-        .withFailureHandler(function(error) {
-          app4ShowLoading(false);
-          app4ShowAlert('LỖI XUẤT', error.message, 'error');
-        })
-        .exportDuBiExcel(filterType, filterValue);
-    } catch (error) {
-      app4ShowLoading(false);
-      app4ShowAlert('LỖI', error.message, 'error');
-    }
+          var byteArray = new Uint8Array(byteNumbers);
+          var blob = new Blob([byteArray], { type: 'application/vnd.ms-excel' });
+
+          var link = document.createElement('a');
+          var url = URL.createObjectURL(blob);
+          link.href = url;
+          link.setAttribute('download', result.fileName || ('du_bi_' + filterType + '_' + filterValue.replace(/\//g, '_') + '.xls'));
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+
+          app4ShowAlert('XUẤT DỮ LIỆU',
+            'Đã xuất ' + result.rowCount + ' dòng dữ liệu thành công!',
+            'success'
+          );
+          app4ShowToast('Đã xuất ' + result.rowCount + ' dòng dữ liệu', 'success');
+        } else {
+          app4ShowAlert('XUẤT THẤT BẠI',
+            (result && result.error) ? result.error : 'Không có dữ liệu để xuất',
+            'error'
+          );
+        }
+      })
+      .catch(function(error) {
+        app4ShowLoading(false);
+        app4ShowAlert('LỖI XUẤT', error.message, 'error');
+      });
   }
 
   // ===== EXPORT TYPE CHANGE =====

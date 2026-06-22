@@ -261,6 +261,24 @@
 
   function getSessionToken(){return window.getCurrentSessionToken?window.getCurrentSessionToken():null;}
 
+  // ===== API CONFIG =====
+  const API_URL = 'https://script.google.com/macros/s/AKfycbwKVrFfGB6DyxpyoU6sAVD-9q2u5P7qe3dO1sPNd4fHdVWT6Eg10fldAkIoPt23Zz2-Mg/exec'; // ⚠️ THAY URL CỦA BẠN
+
+  async function callAPI(action, data, sessionToken = null) {
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action, data: data, sessionToken: sessionToken })
+      });
+      if (!response.ok) throw new Error('HTTP error! status: ' + response.status);
+      return await response.json();
+    } catch (error) {
+      console.error('API Error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   var app1UA=navigator.userAgent?navigator.userAgent.toLowerCase():'';
   var app1IsIOS=/iphone|ipad|ipod/.test(app1UA);
   var app1IsAndroid=/android/.test(app1UA);
@@ -291,11 +309,11 @@
   function app1UpdateSubmitButton(){var allValid=true;for(var key in app1FormValid){if(app1FormValid.hasOwnProperty(key)&&app1FormValid[key]!==true){allValid=false;break;}}var finalValid=allValid&&app1ExpiryDateValid;document.getElementById('submitBtn').disabled=!finalValid;}
 
   // ===== VALIDATION =====
-  function app1ValidateCCCD(){var value=document.getElementById('cccd').value.trim();var isValid=/^\d{12}$/.test(value);app1SetValidationIcon('cccd',isValid);app1FormValid.cccd=isValid;if(isValid&&value){google.script.run.withSuccessHandler(function(result){if(result&&result.success){var div=document.getElementById('cccd-decoded');div.style.display='block';div.innerHTML='<i class="fas fa-info-circle"></i> Giới tính: '+result.gender+' | Năm sinh: '+result.fullBirthYear;if(result.gender){var genderSelect=document.getElementById('gender');if(result.gender==='NAM')genderSelect.value='Nam';else if(result.gender==='NỮ')genderSelect.value='Nữ';app1ValidateGender();}}}).decodeCCCD(value);}else{document.getElementById('cccd-decoded').style.display='none';}app1UpdateSubmitButton();return isValid;}
+  function app1ValidateCCCD(){var value=document.getElementById('cccd').value.trim();var isValid=/^\d{12}$/.test(value);app1SetValidationIcon('cccd',isValid);app1FormValid.cccd=isValid;if(isValid&&value){callAPI('decodeCCCD', value).then(function(result){if(result&&result.success){var div=document.getElementById('cccd-decoded');div.style.display='block';div.innerHTML='<i class="fas fa-info-circle"></i> Giới tính: '+result.gender+' | Năm sinh: '+result.fullBirthYear;if(result.gender){var genderSelect=document.getElementById('gender');if(result.gender==='NAM')genderSelect.value='Nam';else if(result.gender==='NỮ')genderSelect.value='Nữ';app1ValidateGender();}}}).catch(function(error){console.error('Lỗi decode CCCD:',error);});}else{document.getElementById('cccd-decoded').style.display='none';}app1UpdateSubmitButton();return isValid;}
   function app1ValidateFullName(){var value=document.getElementById('fullName').value.trim();var isValid=value!=='';app1SetValidationIcon('fullName',isValid);app1FormValid.fullName=isValid;app1UpdateSubmitButton();return isValid;}
   function app1ValidateHometown(){var value=document.getElementById('hometown').value;var isValid=value!=='';app1SetValidationIcon('hometown',isValid);app1FormValid.hometown=isValid;app1UpdateSubmitButton();return isValid;}
   function app1ValidateGender(){var value=document.getElementById('gender').value;var isValid=value!=='';app1SetValidationIcon('gender',isValid);app1FormValid.gender=isValid;app1UpdateSubmitButton();return isValid;}
-  function app1ValidateExpiryDate(){var value=document.getElementById('expiryDate').value.trim();var isValid=/^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[012])\/(19|20)\d\d$/.test(value);app1SetValidationIcon('expiryDate',isValid);app1FormValid.expiryDate=isValid;var infoDiv=document.getElementById('expiryDate-info');if(isValid&&value){var cccd=document.getElementById('cccd').value;if(cccd.length===12){infoDiv.style.display='block';infoDiv.innerHTML='<i class="fas fa-spinner fa-pulse"></i> Đang kiểm tra...';infoDiv.style.background='#fef3c7';infoDiv.style.padding='6px 10px';infoDiv.style.borderRadius='8px';infoDiv.style.fontSize='11px';google.script.run.withSuccessHandler(function(result){if(result.valid){infoDiv.innerHTML='<i class="fas fa-check-circle"></i> '+result.message;infoDiv.style.background='#d1fae5';infoDiv.style.color='#065f46';app1ExpiryDateValid=true;}else{infoDiv.innerHTML='<i class="fas fa-exclamation-triangle"></i> '+result.message;infoDiv.style.background='#fee2e2';infoDiv.style.color='#991b1b';app1ExpiryDateValid=false;}app1UpdateSubmitButton();}).validateExpiryDateByLaw(cccd,value);}}else{infoDiv.style.display='none';app1ExpiryDateValid=false;}app1UpdateSubmitButton();return isValid;}
+  function app1ValidateExpiryDate(){var value=document.getElementById('expiryDate').value.trim();var isValid=/^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[012])\/(19|20)\d\d$/.test(value);app1SetValidationIcon('expiryDate',isValid);app1FormValid.expiryDate=isValid;var infoDiv=document.getElementById('expiryDate-info');if(isValid&&value){var cccd=document.getElementById('cccd').value;if(cccd.length===12){infoDiv.style.display='block';infoDiv.innerHTML='<i class="fas fa-spinner fa-pulse"></i> Đang kiểm tra...';infoDiv.style.background='#fef3c7';infoDiv.style.padding='6px 10px';infoDiv.style.borderRadius='8px';infoDiv.style.fontSize='11px';callAPI('validateExpiryDate', { cccd: cccd, expiryDate: value }).then(function(result){if(result.valid){infoDiv.innerHTML='<i class="fas fa-check-circle"></i> '+result.message;infoDiv.style.background='#d1fae5';infoDiv.style.color='#065f46';app1ExpiryDateValid=true;}else{infoDiv.innerHTML='<i class="fas fa-exclamation-triangle"></i> '+result.message;infoDiv.style.background='#fee2e2';infoDiv.style.color='#991b1b';app1ExpiryDateValid=false;}app1UpdateSubmitButton();}).catch(function(error){console.error('Lỗi kiểm tra ngày hết hạn:',error);});}}else{infoDiv.style.display='none';app1ExpiryDateValid=false;}app1UpdateSubmitButton();return isValid;}
   function app1ValidateIssuedBy(){var value=document.getElementById('issuedBy').value;var isValid=value!=='';app1SetValidationIcon('issuedBy',isValid);app1FormValid.issuedBy=isValid;app1UpdateSubmitButton();return isValid;}
   function app1ValidateEthnicity(){var value=document.getElementById('ethnicity').value;var isValid=value!=='';app1SetValidationIcon('ethnicity',isValid);app1FormValid.ethnicity=isValid;app1UpdateSubmitButton();return isValid;}
   function app1ValidateReligion(){var value=document.getElementById('religion').value;var isValid=value!=='';app1SetValidationIcon('religion',isValid);app1FormValid.religion=isValid;app1UpdateSubmitButton();return isValid;}
@@ -378,27 +396,18 @@
   // ===== PARSE QR DATA =====
   function app1ParseQRData(rawText){
     return new Promise(function(resolve,reject){
-      try{
-        if(typeof google==='undefined'||!google.script||!google.script.run){
-          reject(new Error('Không thể kết nối đến server'));
-          return;
-        }
-        google.script.run
-          .withSuccessHandler(function(result){
-            if(result&&result.soCCCD){
-              resolve(result);
-            }else{
-              reject(new Error('Không thể đọc QR code từ server'));
-            }
-          })
-          .withFailureHandler(function(error){
-            console.error('❌ Server parse failed:',error);
-            reject(new Error('Lỗi server: '+(error.message||error)));
-          })
-          .parseQRData(rawText);
-      }catch(error){
-        reject(new Error('Lỗi parse QR: '+(error.message||'Không xác định')));
-      }
+      callAPI('parseQRData', { rawText: rawText })
+        .then(function(result){
+          if(result&&result.soCCCD){
+            resolve(result);
+          }else{
+            reject(new Error('Không thể đọc QR code từ server'));
+          }
+        })
+        .catch(function(error){
+          console.error('❌ Server parse failed:',error);
+          reject(new Error('Lỗi server: '+(error.message||error)));
+        });
     });
   }
 
@@ -586,8 +595,8 @@
       document.getElementById('permanentAddress').value.trim()
     ];
     var sessionToken=getSessionToken();
-    google.script.run
-      .withSuccessHandler(function(result){
+    callAPI('saveToSheet', formData, sessionToken)
+      .then(function(result){
         app1ShowLoading(false);
         btn.disabled=false;
         btn.innerHTML='GỬI THÔNG TIN';
@@ -616,25 +625,24 @@
         }
         setTimeout(function(){msgDiv.style.display='none';},5000);
       })
-      .withFailureHandler(function(error){
+      .catch(function(error){
         app1ShowLoading(false);
         btn.disabled=false;
         btn.innerHTML='GỬI THÔNG TIN';
         app1ShowToast('Lỗi: '+error.message,'error');
-      })
-      .saveToSheet(formData,sessionToken);
+      });
   }
 
   // ===== LOAD DROPDOWNS =====
   function app1LoadDropdowns(){
-    google.script.run.withSuccessHandler(function(data){var s=document.getElementById('hometown');s.innerHTML='<option value="">-- CHỌN TỈNH/THÀNH --</option>';for(var i=0;i<data.length;i++){var o=document.createElement('option');o.value=data[i];o.textContent=data[i];s.appendChild(o);}}).getProvinces();
-    google.script.run.withSuccessHandler(function(data){var s=document.getElementById('ethnicity');s.innerHTML='<option value="">-- CHỌN DÂN TỘC --</option>';for(var i=0;i<data.length;i++){var o=document.createElement('option');o.value=data[i];o.textContent=data[i];s.appendChild(o);}}).getEthnicGroups();
-    google.script.run.withSuccessHandler(function(data){var s=document.getElementById('religion');s.innerHTML='<option value="">-- CHỌN TÔN GIÁO --</option>';for(var i=0;i<data.length;i++){var o=document.createElement('option');o.value=data[i];o.textContent=data[i];s.appendChild(o);}}).getReligions();
-    google.script.run.withSuccessHandler(function(data){var s=document.getElementById('issuedBy');s.innerHTML='<option value="">-- CHỌN --</option>';for(var i=0;i<data.length;i++){var o=document.createElement('option');o.value=data[i];o.textContent=data[i];s.appendChild(o);}}).getIssuingAuthorities();
-    google.script.run.withSuccessHandler(function(data){var s=document.getElementById('education');s.innerHTML='<option value="">-- CHỌN --</option>';for(var i=0;i<data.length;i++){var o=document.createElement('option');o.value=data[i];o.textContent=data[i];s.appendChild(o);}}).getEducationLevels();
-    google.script.run.withSuccessHandler(function(data){var s=document.getElementById('relationship');s.innerHTML='<option value="">-- CHỌN --</option>';for(var i=0;i<data.length;i++){var o=document.createElement('option');o.value=data[i];o.textContent=data[i];s.appendChild(o);}}).getRelations();
-    google.script.run.withSuccessHandler(function(data){var s=document.getElementById('source');s.innerHTML='<option value="">-- CHỌN --</option>';for(var i=0;i<data.length;i++){var o=document.createElement('option');o.value=data[i];o.textContent=data[i];s.appendChild(o);}}).getSources();
-    google.script.run.withSuccessHandler(function(data){var s=document.getElementById('workshop');s.innerHTML='<option value="">-- CHỌN --</option>';for(var i=0;i<data.length;i++){var o=document.createElement('option');o.value=data[i];o.textContent=data[i];s.appendChild(o);}}).getWorkshops();
+    callAPI('getProvinces', null).then(function(data){var s=document.getElementById('hometown');s.innerHTML='<option value="">-- CHỌN TỈNH/THÀNH --</option>';if(data&&Array.isArray(data)){for(var i=0;i<data.length;i++){var o=document.createElement('option');o.value=data[i];o.textContent=data[i];s.appendChild(o);}}}).catch(function(error){console.error('Lỗi tải danh sách tỉnh:',error);});
+    callAPI('getEthnicGroups', null).then(function(data){var s=document.getElementById('ethnicity');s.innerHTML='<option value="">-- CHỌN DÂN TỘC --</option>';if(data&&Array.isArray(data)){for(var i=0;i<data.length;i++){var o=document.createElement('option');o.value=data[i];o.textContent=data[i];s.appendChild(o);}}}).catch(function(error){console.error('Lỗi tải danh sách dân tộc:',error);});
+    callAPI('getReligions', null).then(function(data){var s=document.getElementById('religion');s.innerHTML='<option value="">-- CHỌN TÔN GIÁO --</option>';if(data&&Array.isArray(data)){for(var i=0;i<data.length;i++){var o=document.createElement('option');o.value=data[i];o.textContent=data[i];s.appendChild(o);}}}).catch(function(error){console.error('Lỗi tải danh sách tôn giáo:',error);});
+    callAPI('getIssuingAuthorities', null).then(function(data){var s=document.getElementById('issuedBy');s.innerHTML='<option value="">-- CHỌN --</option>';if(data&&Array.isArray(data)){for(var i=0;i<data.length;i++){var o=document.createElement('option');o.value=data[i];o.textContent=data[i];s.appendChild(o);}}}).catch(function(error){console.error('Lỗi tải danh sách nơi cấp:',error);});
+    callAPI('getEducationLevels', null).then(function(data){var s=document.getElementById('education');s.innerHTML='<option value="">-- CHỌN --</option>';if(data&&Array.isArray(data)){for(var i=0;i<data.length;i++){var o=document.createElement('option');o.value=data[i];o.textContent=data[i];s.appendChild(o);}}}).catch(function(error){console.error('Lỗi tải danh sách trình độ:',error);});
+    callAPI('getRelations', null).then(function(data){var s=document.getElementById('relationship');s.innerHTML='<option value="">-- CHỌN --</option>';if(data&&Array.isArray(data)){for(var i=0;i<data.length;i++){var o=document.createElement('option');o.value=data[i];o.textContent=data[i];s.appendChild(o);}}}).catch(function(error){console.error('Lỗi tải danh sách quan hệ:',error);});
+    callAPI('getSources', null).then(function(data){var s=document.getElementById('source');s.innerHTML='<option value="">-- CHỌN --</option>';if(data&&Array.isArray(data)){for(var i=0;i<data.length;i++){var o=document.createElement('option');o.value=data[i];o.textContent=data[i];s.appendChild(o);}}}).catch(function(error){console.error('Lỗi tải danh sách nguồn tin:',error);});
+    callAPI('getWorkshops', null).then(function(data){var s=document.getElementById('workshop');s.innerHTML='<option value="">-- CHỌN --</option>';if(data&&Array.isArray(data)){for(var i=0;i<data.length;i++){var o=document.createElement('option');o.value=data[i];o.textContent=data[i];s.appendChild(o);}}}).catch(function(error){console.error('Lỗi tải danh sách xưởng:',error);});
   }
 
   // ===== SETUP EVENT LISTENERS =====

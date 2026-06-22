@@ -1043,6 +1043,24 @@
     return window.getCurrentSessionToken ? window.getCurrentSessionToken() : null;
   }
 
+  // ===== API CONFIG =====
+  const API_URL = 'https://script.google.com/macros/s/AKfycbwKVrFfGB6DyxpyoU6sAVD-9q2u5P7qe3dO1sPNd4fHdVWT6Eg10fldAkIoPt23Zz2-Mg/exec'; // ⚠️ THAY URL CỦA BẠN
+
+  async function callAPI(action, data, sessionToken = null) {
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action, data: data, sessionToken: sessionToken })
+      });
+      if (!response.ok) throw new Error('HTTP error! status: ' + response.status);
+      return await response.json();
+    } catch (error) {
+      console.error('API Error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   // ===== PHÁT HIỆN THIẾT BỊ =====
   var app2UA = navigator.userAgent ? navigator.userAgent.toLowerCase() : '';
   var app2IsIOS = /iphone|ipad|ipod/.test(app2UA);
@@ -1566,34 +1584,24 @@
   // ===== PARSE CCCD =====
   function app2ParseCCCD(raw) {
     return new Promise(function(resolve, reject) {
-      try {
-        if (typeof google === 'undefined' || !google.script || !google.script.run) {
-          reject(new Error('Không thể kết nối đến server'));
-          return;
-        }
-
-        google.script.run
-          .withSuccessHandler(function(result) {
-            if (result && result.soCCCD) {
-              result.platformInfo = {
-                platform: app2IsIOS ? 'iOS' : (app2IsAndroid ? 'Android' : 'Desktop'),
-                browser: app2IsSafari ? 'Safari' : (app2IsChrome ? 'Chrome' : 'Other'),
-                iosVersion: app2IsIOS ? app2GetIOSVersion() : 0,
-                deviceType: app2DeviceConfig.compatibility || 'default'
-              };
-              resolve(result);
-            } else {
-              reject(new Error('Không thể đọc QR code từ server'));
-            }
-          })
-          .withFailureHandler(function(error) {
-            console.error('❌ Server parse failed:', error);
-            reject(new Error('Lỗi server: ' + (error.message || error)));
-          })
-          .parseQRData(raw);
-      } catch (error) {
-        reject(new Error('Lỗi parse QR: ' + (error.message || 'Không xác định')));
-      }
+      callAPI('parseQRData', { rawText: raw })
+        .then(function(result) {
+          if (result && result.soCCCD) {
+            result.platformInfo = {
+              platform: app2IsIOS ? 'iOS' : (app2IsAndroid ? 'Android' : 'Desktop'),
+              browser: app2IsSafari ? 'Safari' : (app2IsChrome ? 'Chrome' : 'Other'),
+              iosVersion: app2IsIOS ? app2GetIOSVersion() : 0,
+              deviceType: app2DeviceConfig.compatibility || 'default'
+            };
+            resolve(result);
+          } else {
+            reject(new Error('Không thể đọc QR code từ server'));
+          }
+        })
+        .catch(function(error) {
+          console.error('❌ Server parse failed:', error);
+          reject(new Error('Lỗi server: ' + (error.message || error)));
+        });
     });
   }
 
@@ -1640,26 +1648,20 @@
 
   // ===== GET NEXT STT =====
   function app2GetNextSTT() {
-    try {
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result && !isNaN(result)) {
-            var sttInput = document.getElementById('app2_sttQuet');
-            if (sttInput) sttInput.value = result;
-            app2ValidateForm();
-          }
-        })
-        .withFailureHandler(function() {
+    callAPI('getNextSTT', null)
+      .then(function(result) {
+        if (result && !isNaN(result)) {
           var sttInput = document.getElementById('app2_sttQuet');
-          if (sttInput && sttInput.value === '') sttInput.value = 1;
+          if (sttInput) sttInput.value = result;
           app2ValidateForm();
-        })
-        .getNextSTTQuet();
-    } catch (error) {
-      var sttInput = document.getElementById('app2_sttQuet');
-      if (sttInput && sttInput.value === '') sttInput.value = 1;
-      app2ValidateForm();
-    }
+        }
+      })
+      .catch(function(error) {
+        console.error('Lỗi lấy STT:', error);
+        var sttInput = document.getElementById('app2_sttQuet');
+        if (sttInput && sttInput.value === '') sttInput.value = 1;
+        app2ValidateForm();
+      });
   }
 
   // ===== SEND DATA =====
@@ -1689,8 +1691,8 @@
 
     var sessionToken = getSessionToken();
 
-    google.script.run
-      .withSuccessHandler(function(result) {
+    callAPI('saveCCCD', payload, sessionToken)
+      .then(function(result) {
         app2ShowLoading(false);
         if (result && result.status === 'error') {
           var errorTitle = 'Lỗi';
@@ -1715,12 +1717,11 @@
           }
         }
       })
-      .withFailureHandler(function(error) {
+      .catch(function(error) {
         app2ShowLoading(false);
         app2ShowAlert('Lỗi kết nối', error.message || 'Không thể kết nối đến server. Vui lòng kiểm tra mạng!', 'error');
         app2ShowToast('❌ Lỗi: ' + (error.message || 'Không xác định'), 'error');
-      })
-      .saveCCCD(payload, sessionToken);
+      });
   }
 
   // ===== RESET =====
@@ -1902,25 +1903,19 @@
   // ===== TEST CONNECTION =====
   function app2TestConnection() {
     app2ShowLoading(true);
-    try {
-      google.script.run
-        .withSuccessHandler(function(result) {
-          app2ShowLoading(false);
-          if (result && result.status === 'success') {
-            app2ShowAlert('Kết nối thành công!', result.message || 'Kết nối đến Google Sheets hoạt động bình thường.', 'success');
-          } else {
-            app2ShowAlert('Lỗi kết nối', (result && result.message) || 'Không thể kết nối đến server.', 'error');
-          }
-        })
-        .withFailureHandler(function(error) {
-          app2ShowLoading(false);
-          app2ShowAlert('Lỗi kết nối', 'Không thể kết nối đến server. Vui lòng kiểm tra internet.', 'error');
-        })
-        .testConnection();
-    } catch (error) {
-      app2ShowLoading(false);
-      app2ShowAlert('Lỗi', 'Không thể kết nối đến server.', 'error');
-    }
+    callAPI('testConnection', null)
+      .then(function(result) {
+        app2ShowLoading(false);
+        if (result && result.status === 'success') {
+          app2ShowAlert('Kết nối thành công!', result.message || 'Kết nối đến Google Sheets hoạt động bình thường.', 'success');
+        } else {
+          app2ShowAlert('Lỗi kết nối', (result && result.message) || 'Không thể kết nối đến server.', 'error');
+        }
+      })
+      .catch(function(error) {
+        app2ShowLoading(false);
+        app2ShowAlert('Lỗi kết nối', 'Không thể kết nối đến server. Vui lòng kiểm tra internet.', 'error');
+      });
   }
 
   // ===== CHECK COMPATIBILITY =====

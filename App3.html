@@ -275,10 +275,28 @@
 
 <script>
   // ============================================================
-  // APP 3 - XÁC NHẬN SAU PHỎNG VẤN (QR SỬA LỖI SERVER)
+  // APP 3 - XÁC NHẬN SAU PHỎNG VẤN (QR ĐÃ SỬA - HOÀN CHỈNH)
   // ============================================================
 
   function getSessionToken(){return window.getCurrentSessionToken?window.getCurrentSessionToken():null;}
+
+  // ===== API CONFIG =====
+  const API_URL = 'https://script.google.com/macros/s/AKfycbwKVrFfGB6DyxpyoU6sAVD-9q2u5P7qe3dO1sPNd4fHdVWT6Eg10fldAkIoPt23Zz2-Mg/exec'; // ⚠️ THAY URL CỦA BẠN
+
+  async function callAPI(action, data, sessionToken = null) {
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action, data: data, sessionToken: sessionToken })
+      });
+      if (!response.ok) throw new Error('HTTP error! status: ' + response.status);
+      return await response.json();
+    } catch (error) {
+      console.error('API Error:', error);
+      return { success: false, error: error.message };
+    }
+  }
 
   var app3UA=navigator.userAgent?navigator.userAgent.toLowerCase():'';
   var app3IsIOS=/iphone|ipad|ipod/.test(app3UA);
@@ -315,196 +333,47 @@
 
   function app3CapitalizeName(str){if(!str)return str;return str.toLowerCase().replace(/(^|\s)\S/g,function(m){return m.toUpperCase();});}
 
-  // ===== PARSE QR DATA - CLIENT SIDE (KHÔNG GỌI SERVER) =====
-  function app3ParseQRClient(rawText){
-    try{
-      if(!rawText||rawText.trim()===''){
-        return {success:false, error:'Dữ liệu QR rỗng'};
-      }
-      
-      var cleanedRaw=rawText.toString().trim();
-      var result={success:false};
-      
-      // === Định dạng 1: Dạng có dấu | (định dạng chuẩn của CCCD gắn chip) ===
-      if(cleanedRaw.indexOf('|')!==-1){
-        var parts=cleanedRaw.split('|').map(function(p){return p.trim();});
-        // Đảm bảo có đủ 7 phần
-        while(parts.length<7) parts.push('');
-        
-        var soCCCD=parts[0]||'';
-        // Chuẩn hóa CCCD
-        soCCCD=soCCCD.replace(/^'/, '');
-        if(soCCCD.length>0&&soCCCD.length<12){
-          while(soCCCD.length<12) soCCCD='0'+soCCCD;
-        }
-        
-        var ngaySinh=parts[3]||'';
-        if(ngaySinh&&ngaySinh.length===8&&/^\d{8}$/.test(ngaySinh)){
-          ngaySinh=ngaySinh.substring(0,2)+'-'+ngaySinh.substring(2,4)+'-'+ngaySinh.substring(4,8);
-        }
-        
-        var ngayCap=parts[6]||'';
-        if(ngayCap&&ngayCap.length===8&&/^\d{8}$/.test(ngayCap)){
-          ngayCap=ngayCap.substring(0,2)+'-'+ngayCap.substring(2,4)+'-'+ngayCap.substring(4,8);
-        }
-        
-        // Phân tích địa chỉ
-        var noiThuongTru=parts[5]||'';
-        var parsedAddress=app3ParseAddress(noiThuongTru);
-        
-        return {
-          success:true,
-          cccd:soCCCD,
-          cmnd:parts[1]||'',
-          hoTen:parts[2]||'',
-          ngaySinh:ngaySinh,
-          gioiTinh:parts[4]||'',
-          noiThuongTru:noiThuongTru,
-          ngayCapCCCD:ngayCap,
-          hamlet:parsedAddress.hamlet,
-          street:parsedAddress.street,
-          oldWard:parsedAddress.ward,
-          oldDistrict:parsedAddress.district,
-          oldProvince:parsedAddress.province,
-          tamTruRaw:noiThuongTru
-        };
-      }
-      
-      // === Định dạng 2: Dạng JSON ===
-      if(cleanedRaw.startsWith('{')&&cleanedRaw.endsWith('}')){
-        try{
-          var json=JSON.parse(cleanedRaw);
-          var soCCCD=json.id||json.soCCCD||json.CCCD||'';
-          soCCCD=soCCCD.replace(/^'/, '');
-          if(soCCCD.length>0&&soCCCD.length<12){
-            while(soCCCD.length<12) soCCCD='0'+soCCCD;
-          }
-          
-          var noiThuongTru=json.address||json.noiThuongTru||json.diaChi||'';
-          var parsedAddress=app3ParseAddress(noiThuongTru);
-          
-          return {
-            success:true,
-            cccd:soCCCD,
-            cmnd:json.cmnd||'',
-            hoTen:json.name||json.hoTen||'',
-            ngaySinh:json.dob||json.ngaySinh||'',
-            gioiTinh:json.gender||json.gioiTinh||'',
-            noiThuongTru:noiThuongTru,
-            ngayCapCCCD:json.issueDate||json.ngayCap||'',
-            hamlet:parsedAddress.hamlet,
-            street:parsedAddress.street,
-            oldWard:parsedAddress.ward,
-            oldDistrict:parsedAddress.district,
-            oldProvince:parsedAddress.province,
-            tamTruRaw:noiThuongTru
-          };
-        }catch(e){}
-      }
-      
-      // === Định dạng 3: Chỉ có CCCD (12 số) ===
-      var cccdMatch=cleanedRaw.match(/\b\d{12}\b/);
-      if(cccdMatch&&cccdMatch[0]){
-        var cccd=cccdMatch[0];
-        return {
-          success:true,
-          cccd:cccd,
-          cmnd:'',
-          hoTen:'',
-          ngaySinh:'',
-          gioiTinh:'',
-          noiThuongTru:'',
-          ngayCapCCCD:'',
-          hamlet:'',
-          street:'',
-          oldWard:'',
-          oldDistrict:'',
-          oldProvince:'',
-          tamTruRaw:''
-        };
-      }
-      
-      // === Định dạng 4: Có dấu phẩy (địa chỉ) ===
-      if(cleanedRaw.indexOf(',')!==-1 || cleanedRaw.indexOf('，')!==-1){
-        // Có thể là địa chỉ, thử trích xuất CCCD
-        var allNumbers=cleanedRaw.replace(/[^0-9]/g,'');
-        if(allNumbers.length>=9){
-          var possibleCCCD=allNumbers.substring(0,12);
-          if(possibleCCCD.length===12){
-            return {
-              success:true,
-              cccd:possibleCCCD,
-              cmnd:'',
-              hoTen:'',
-              ngaySinh:'',
-              gioiTinh:'',
-              noiThuongTru:cleanedRaw,
-              ngayCapCCCD:'',
-              hamlet:'',
-              street:'',
-              oldWard:'',
-              oldDistrict:'',
-              oldProvince:'',
-              tamTruRaw:cleanedRaw
-            };
-          }
-        }
-      }
-      
-      return {success:false, error:'Không thể đọc định dạng QR'};
-      
-    }catch(e){
-      return {success:false, error:'Lỗi parse QR: '+e.message};
-    }
-  }
-
-  // ===== PARSE ADDRESS =====
-  function app3ParseAddress(fullAddress){
-    try{
-      if(!fullAddress||fullAddress.trim()===''){
-        return {hamlet:'', street:'', ward:'', district:'', province:''};
-      }
-      var address=fullAddress.toString().trim();
-      var parts=address.split(/[,，]+/).map(function(p){return p.trim();});
-      var hamlet='', street='', ward='', district='', province='';
-      
-      var hamletKeywords=/^(Thôn|Xóm|Ấp|Buôn|Bản|Làng|Khu phố|Tổ dân phố|Ngõ|Ngách|Hẻm|Tổ|Đội)/i;
-      var wardKeywords=/^(Phường|Xã|Thị Trấn|Thị trấn|TT)/i;
-      var districtKeywords=/^(Quận|Huyện|Thành Phố|Thị Xã|TP|Tx)/i;
-      
-      if(parts.length===1){
-        if(wardKeywords.test(parts[0])) ward=parts[0];
-        else province=parts[0];
-      }else if(parts.length===2){
-        if(wardKeywords.test(parts[1])){street=parts[0];ward=parts[1];}
-        else{ward=parts[0];province=parts[1];}
-      }else if(parts.length===3){
-        street=parts[0];
-        if(wardKeywords.test(parts[1])){ward=parts[1];province=parts[2];}
-        else{ward=parts[1];district=parts[2];}
-      }else if(parts.length>=4){
-        var idx=0;
-        if(hamletKeywords.test(parts[0])){hamlet=parts[0];idx=1;}
-        if(idx<parts.length){street=parts[idx];idx++;}
-        if(idx<parts.length&&wardKeywords.test(parts[idx])){ward=parts[idx];idx++;}
-        else if(idx<parts.length&&parts[idx]&&!ward){ward=parts[idx];idx++;}
-        if(idx<parts.length&&districtKeywords.test(parts[idx])){district=parts[idx];idx++;}
-        else if(idx<parts.length&&parts[idx]&&!district){district=parts[idx];idx++;}
-        if(idx<parts.length){province=parts.slice(idx).join(', ');}
-      }
-      if(!province&&parts.length>0){province=parts[parts.length-1];}
-      return {hamlet:hamlet, street:street, ward:ward, district:district, province:province};
-    }catch(e){
-      return {hamlet:'', street:'', ward:'', district:'', province:''};
-    }
-  }
-
   // ===== LOAD DROPDOWNS =====
-  function app3LoadWorkshopAndPositionData(){try{google.script.run.withSuccessHandler(function(result){if(result&&result.success===true){app3AllWorkshops=result.workshops||[];app3WorkshopPositionMap=result.positionMap||{};var datalist=document.getElementById('app3_cxList');if(datalist){datalist.innerHTML='';for(var i=0;i<app3AllWorkshops.length;i++){var option=document.createElement('option');option.value=app3AllWorkshops[i];datalist.appendChild(option);}}}}).withFailureHandler(function(error){console.error('Lỗi tải dữ liệu công xưởng:',error);}).getWorkshopList();}catch(error){console.error('Lỗi tải dữ liệu:',error);}}
+  function app3LoadWorkshopAndPositionData(){
+    callAPI('getWorkshopList', null)
+      .then(function(result){
+        if(result&&result.success===true){
+          app3AllWorkshops=result.workshops||[];
+          app3WorkshopPositionMap=result.positionMap||{};
+          var datalist=document.getElementById('app3_cxList');
+          if(datalist){
+            datalist.innerHTML='';
+            for(var i=0;i<app3AllWorkshops.length;i++){
+              var option=document.createElement('option');
+              option.value=app3AllWorkshops[i];
+              datalist.appendChild(option);
+            }
+          }
+        }
+      })
+      .catch(function(error){console.error('Lỗi tải dữ liệu công xưởng:',error);});
+  }
 
   function app3UpdatePositionList(selectedWorkshop){var datalist=document.getElementById('app3_cvListDynamic');if(!datalist)return;datalist.innerHTML='';var positions=[];if(app3WorkshopPositionMap&&app3WorkshopPositionMap[selectedWorkshop]){positions=app3WorkshopPositionMap[selectedWorkshop];}else if(selectedWorkshop&&selectedWorkshop.trim()!==''){positions=['Chức vụ tại '+selectedWorkshop,'Nhân viên'];}for(var i=0;i<positions.length;i++){var option=document.createElement('option');option.value=positions[i];datalist.appendChild(option);}}
 
-  function app3LoadReferrerList(){try{google.script.run.withSuccessHandler(function(result){if(result&&result.list){app3ReferrerList=result.list;var datalist=document.getElementById('app3_referrerList');if(datalist){datalist.innerHTML='';for(var i=0;i<result.list.length;i++){var option=document.createElement('option');option.value=result.list[i];datalist.appendChild(option);}}}}).withFailureHandler(function(error){console.error('Lỗi tải danh sách giới thiệu:',error);}).getReferrerList();}catch(error){console.error('Lỗi tải danh sách:',error);}}
+  function app3LoadReferrerList(){
+    callAPI('getReferrerList', null)
+      .then(function(result){
+        if(result&&result.list){
+          app3ReferrerList=result.list;
+          var datalist=document.getElementById('app3_referrerList');
+          if(datalist){
+            datalist.innerHTML='';
+            for(var i=0;i<result.list.length;i++){
+              var option=document.createElement('option');
+              option.value=result.list[i];
+              datalist.appendChild(option);
+            }
+          }
+        }
+      })
+      .catch(function(error){console.error('Lỗi tải danh sách giới thiệu:',error);});
+  }
 
   // ===== LOAD CAMERAS =====
   async function app3LoadCameras(){
@@ -602,7 +471,7 @@
     }
   }
 
-  // ===== HANDLE QR CODE (CLIENT PARSE) =====
+  // ===== HANDLE QR CODE =====
   function app3HandleQRCode(content){
     if(!content){
       app3ShowQRStatus('❌ Nội dung QR trống','error');
@@ -611,53 +480,39 @@
     console.log('📷 QR Code content:',content);
     app3ShowQRStatus('📷 Đã đọc mã QR, đang xử lý...','info');
 
-    // Parse trực tiếp ở client
-    var parsedData = app3ParseQRClient(content);
-    
-    if(parsedData.success){
-      console.log('✅ Parse thành công:',parsedData);
-      app3FillFormFromQR(parsedData);
-      app3ShowQRStatus('✅ Đã đọc QR thành công!','success');
-      app3ShowToast('Đã đọc QR thành công!','success');
-      if(app3IsScanning){
-        setTimeout(function(){app3StopScanner();},1000);
-      }
-    }else{
-      console.error('❌ Parse thất bại:',parsedData.error);
-      app3ShowQRStatus('❌ '+parsedData.error,'error');
-      app3ShowToast('Lỗi đọc QR: '+parsedData.error,'error');
-    }
-  }
-
-  // ===== IMAGE UPLOAD QR =====
-  function app3HandleImageUpload(file){
-    if(!file)return;
-    if(!file.type.startsWith('image/')){app3ShowToast('Vui lòng chọn file ảnh','error');return;}
-    app3ShowLoading(true);
-    app3ShowQRStatus('🔄 Đang đọc ảnh QR...','info');
-    var tempDiv=document.createElement('div');
-    tempDiv.id='temp_qr_scanner_'+Date.now();
-    tempDiv.style.cssText='position:fixed; top:-1000px; left:-1000px; width:300px; height:300px;';
-    document.body.appendChild(tempDiv);
-    var tempQr=new Html5Qrcode(tempDiv.id);
-    tempQr.scanFile(file,true)
-      .then(function(decodedText){
-        if(tempDiv&&tempDiv.parentNode)document.body.removeChild(tempDiv);
-        app3ShowLoading(false);
-        if(decodedText&&decodedText.trim()){
-          app3HandleQRCode(decodedText);
-        }else{
-          app3ShowQRStatus('❌ Không đọc được mã QR trong ảnh','error');
-          app3ShowToast('Không tìm thấy mã QR','error');
+    app3ParseQRData(content)
+      .then(function(parsedData){
+        console.log('✅ Server response:',parsedData);
+        app3FillFormFromQR(parsedData);
+        app3ShowQRStatus('✅ Đã đọc QR thành công!','success');
+        app3ShowToast('Đã đọc QR thành công!','success');
+        if(app3IsScanning){
+          setTimeout(function(){app3StopScanner();},1000);
         }
       })
       .catch(function(error){
-        if(tempDiv&&tempDiv.parentNode)document.body.removeChild(tempDiv);
-        app3ShowLoading(false);
-        console.error('Lỗi quét file:',error);
-        app3ShowQRStatus('❌ Lỗi: '+error.message,'error');
-        app3ShowToast('Không thể đọc mã QR từ ảnh','error');
+        console.error('❌ Error:',error);
+        app3ShowQRStatus('❌ '+error.message,'error');
+        app3ShowToast('Lỗi đọc QR: '+error.message,'error');
       });
+  }
+
+  // ===== PARSE QR DATA =====
+  function app3ParseQRData(rawText){
+    return new Promise(function(resolve,reject){
+      callAPI('parseQRData', { rawText: rawText })
+        .then(function(result){
+          if(result&&result.success){
+            resolve(result);
+          }else{
+            reject(new Error('Không thể đọc QR code từ server'));
+          }
+        })
+        .catch(function(error){
+          console.error('❌ Server parse failed:',error);
+          reject(new Error('Lỗi server: '+(error.message||error)));
+        });
+    });
   }
 
   // ===== FILL FORM FROM QR =====
@@ -728,6 +583,37 @@
     }
   }
 
+  // ===== IMAGE UPLOAD QR =====
+  function app3HandleImageUpload(file){
+    if(!file)return;
+    if(!file.type.startsWith('image/')){app3ShowToast('Vui lòng chọn file ảnh','error');return;}
+    app3ShowLoading(true);
+    app3ShowQRStatus('🔄 Đang đọc ảnh QR...','info');
+    var tempDiv=document.createElement('div');
+    tempDiv.id='temp_qr_scanner_'+Date.now();
+    tempDiv.style.cssText='position:fixed; top:-1000px; left:-1000px; width:300px; height:300px;';
+    document.body.appendChild(tempDiv);
+    var tempQr=new Html5Qrcode(tempDiv.id);
+    tempQr.scanFile(file,true)
+      .then(function(decodedText){
+        if(tempDiv&&tempDiv.parentNode)document.body.removeChild(tempDiv);
+        app3ShowLoading(false);
+        if(decodedText&&decodedText.trim()){
+          app3HandleQRCode(decodedText);
+        }else{
+          app3ShowQRStatus('❌ Không đọc được mã QR trong ảnh','error');
+          app3ShowToast('Không tìm thấy mã QR','error');
+        }
+      })
+      .catch(function(error){
+        if(tempDiv&&tempDiv.parentNode)document.body.removeChild(tempDiv);
+        app3ShowLoading(false);
+        console.error('Lỗi quét file:',error);
+        app3ShowQRStatus('❌ Lỗi: '+error.message,'error');
+        app3ShowToast('Không thể đọc mã QR từ ảnh','error');
+      });
+  }
+
   // ===== TRA CỨU CCCD =====
   function app3LookupCCCD(){
     if(app3IsProcessing)return;
@@ -738,36 +624,29 @@
     document.getElementById('app3_cccd').value=normalized;
     app3IsProcessing=true;
     app3ShowLoading(true);
-    try{
-      google.script.run
-        .withSuccessHandler(function(data){
-          app3IsProcessing=false;
-          app3ShowLoading(false);
-          if(data&&data.error){app3ShowModal(data.error,'error');return;}
-          if(data&&data.success){
-            if(data.hoTen)document.getElementById('app3_hoTen').value=data.hoTen;
-            if(data.gioiTinh)document.getElementById('app3_gioiTinh').value=data.gioiTinh;
-            if(data.hamlet)document.getElementById('app3_hamlet').value=data.hamlet;
-            if(data.street)document.getElementById('app3_street').value=data.street;
-            if(data.oldWard)document.getElementById('app3_oldWard').value=data.oldWard;
-            if(data.oldDistrict)document.getElementById('app3_oldDistrict').value=data.oldDistrict;
-            if(data.oldProvince)document.getElementById('app3_oldProvince').value=data.oldProvince;
-            app3ShowModal('Đã tìm thấy thông tin từ CCCD!','success');
-          }else{
-            app3ShowModal('Không tìm thấy CCCD trong cơ sở dữ liệu','error');
-          }
-        })
-        .withFailureHandler(function(error){
-          app3IsProcessing=false;
-          app3ShowLoading(false);
-          app3ShowModal('Lỗi: '+error.message,'error');
-        })
-        .lookupAddressByCCCD(normalized);
-    }catch(error){
-      app3IsProcessing=false;
-      app3ShowLoading(false);
-      app3ShowModal('Lỗi kết nối: '+error.message,'error');
-    }
+    callAPI('lookupAddress', normalized)
+      .then(function(data){
+        app3IsProcessing=false;
+        app3ShowLoading(false);
+        if(data&&data.error){app3ShowModal(data.error,'error');return;}
+        if(data&&data.success){
+          if(data.hoTen)document.getElementById('app3_hoTen').value=data.hoTen;
+          if(data.gioiTinh)document.getElementById('app3_gioiTinh').value=data.gioiTinh;
+          if(data.hamlet)document.getElementById('app3_hamlet').value=data.hamlet;
+          if(data.street)document.getElementById('app3_street').value=data.street;
+          if(data.oldWard)document.getElementById('app3_oldWard').value=data.oldWard;
+          if(data.oldDistrict)document.getElementById('app3_oldDistrict').value=data.oldDistrict;
+          if(data.oldProvince)document.getElementById('app3_oldProvince').value=data.oldProvince;
+          app3ShowModal('Đã tìm thấy thông tin từ CCCD!','success');
+        }else{
+          app3ShowModal('Không tìm thấy CCCD trong cơ sở dữ liệu','error');
+        }
+      })
+      .catch(function(error){
+        app3IsProcessing=false;
+        app3ShowLoading(false);
+        app3ShowModal('Lỗi: '+error.message,'error');
+      });
   }
 
   // ===== RESET FORM =====
@@ -806,30 +685,28 @@
     if(!oldProvince||!oldWard){app3ShowModal('Vui lòng nhập Xã cũ và Tỉnh cũ!','warning');return;}
     app3IsProcessing=true;
     app3ShowLoading(true);
-    try{
-      google.script.run
-        .withSuccessHandler(function(data){
-          app3IsProcessing=false;
-          app3ShowLoading(false);
-          if(!data||!data.success){app3ShowModal('Lỗi: '+(data&&data.error?data.error:'Không rõ'),'error');return;}
-          app3CurrentConvertData=data;
-          var html='<div class="app3-result-area"><h3><i class="fas fa-check-circle" style="color:#059669;"></i> Kết quả chuyển đổi (có thể sửa địa chỉ mới)</h3><div class="app3-address-compare"><div class="app3-address-box old"><strong>🏚️ Địa chỉ cũ:</strong><br>'+app3EscapeHtml(data.oldAddress)+'</div><div class="app3-address-box new"><strong>🏢 Địa chỉ mới (sáp nhập):</strong><br>'+app3EscapeHtml(data.newAddress)+'<br><small style="color:#64748b;">✏️ Bấm vào ô bên dưới để sửa nếu cần</small><input type="text" class="app3-editable-input" id="app3_editableNewAddress" value="'+app3EscapeHtml(data.newAddress)+'"></div></div></div>';
-          document.getElementById('app3_convertResultArea').innerHTML=html;
-          var newAddrInput=document.getElementById('app3_editableNewAddress');
-          if(newAddrInput){newAddrInput.addEventListener('change',function(){app3CurrentConvertData.newAddress=this.value;app3ShowModal('Đã cập nhật địa chỉ mới theo ý bạn!','info');});}
-          app3ShowModal('Chuyển đổi thành công!','success');
-        })
-        .withFailureHandler(function(error){
-          app3IsProcessing=false;
-          app3ShowLoading(false);
-          app3ShowModal('Lỗi: '+error.message,'error');
-        })
-        .convertAddress(fullStreet,oldWard,oldDistrict,oldProvince);
-    }catch(error){
+    callAPI('convertAddress', {
+      street: fullStreet,
+      oldWard: oldWard,
+      oldDistrict: oldDistrict,
+      oldProvince: oldProvince
+    })
+    .then(function(data){
       app3IsProcessing=false;
       app3ShowLoading(false);
-      app3ShowModal('Lỗi kết nối: '+error.message,'error');
-    }
+      if(!data||!data.success){app3ShowModal('Lỗi: '+(data&&data.error?data.error:'Không rõ'),'error');return;}
+      app3CurrentConvertData=data;
+      var html='<div class="app3-result-area"><h3><i class="fas fa-check-circle" style="color:#059669;"></i> Kết quả chuyển đổi (có thể sửa địa chỉ mới)</h3><div class="app3-address-compare"><div class="app3-address-box old"><strong>🏚️ Địa chỉ cũ:</strong><br>'+app3EscapeHtml(data.oldAddress)+'</div><div class="app3-address-box new"><strong>🏢 Địa chỉ mới (sáp nhập):</strong><br>'+app3EscapeHtml(data.newAddress)+'<br><small style="color:#64748b;">✏️ Bấm vào ô bên dưới để sửa nếu cần</small><input type="text" class="app3-editable-input" id="app3_editableNewAddress" value="'+app3EscapeHtml(data.newAddress)+'"></div></div></div>';
+      document.getElementById('app3_convertResultArea').innerHTML=html;
+      var newAddrInput=document.getElementById('app3_editableNewAddress');
+      if(newAddrInput){newAddrInput.addEventListener('change',function(){app3CurrentConvertData.newAddress=this.value;app3ShowModal('Đã cập nhật địa chỉ mới theo ý bạn!','info');});}
+      app3ShowModal('Chuyển đổi thành công!','success');
+    })
+    .catch(function(error){
+      app3IsProcessing=false;
+      app3ShowLoading(false);
+      app3ShowModal('Lỗi: '+error.message,'error');
+    });
   }
 
   // ===== THÔNG TIN GIỚI THIỆU =====
@@ -855,32 +732,38 @@
     if(code===''){document.getElementById('app3_mgNameSelection').style.display='none';app3ClearReferrerInfo();return;}
     if(code==='MG'){
       document.getElementById('app3_mgNameSelection').style.display='block';
-      try{
-        google.script.run.withSuccessHandler(function(data){if(data&&data.success){document.getElementById('app3_daiBoPhan').value=data.daiBoPhan||'';document.getElementById('app3_congXuongGT').value=data.congXuong||'';document.getElementById('app3_khuGT').value=data.khu||'';document.getElementById('app3_boPhanGT').value=data.boPhan||'';document.getElementById('app3_chuyenGT').value=data.chuyen||'';document.getElementById('app3_chucVuGT').value=data.chucVu||'';}}).withFailureHandler(function(error){console.error('Lỗi lấy thông tin MG:',error);}).getReferrerInfoByCode('MG');
-      }catch(error){console.error('Lỗi:',error);}
-      return;
-    }
-    document.getElementById('app3_mgNameSelection').style.display='none';
-    try{
-      google.script.run
-        .withSuccessHandler(function(data){
+      callAPI('getReferrerInfo', 'MG')
+        .then(function(data){
           if(data&&data.success){
-            document.getElementById('app3_hoTenGT').value=data.hoTen||'';
             document.getElementById('app3_daiBoPhan').value=data.daiBoPhan||'';
             document.getElementById('app3_congXuongGT').value=data.congXuong||'';
             document.getElementById('app3_khuGT').value=data.khu||'';
             document.getElementById('app3_boPhanGT').value=data.boPhan||'';
             document.getElementById('app3_chuyenGT').value=data.chuyen||'';
             document.getElementById('app3_chucVuGT').value=data.chucVu||'';
-          }else{
-            app3ShowModal(data&&data.error?data.error:'Không tìm thấy mã số thẻ','error');
-            document.getElementById('app3_maGioiThieu').value='';
-            app3ClearReferrerInfo();
           }
         })
-        .withFailureHandler(function(error){console.error('Lỗi lấy thông tin giới thiệu:',error);app3ShowModal('Lỗi tìm mã số thẻ','error');})
-        .getReferrerInfoByCode(code);
-    }catch(error){console.error('Lỗi:',error);}
+        .catch(function(error){console.error('Lỗi lấy thông tin MG:',error);});
+      return;
+    }
+    document.getElementById('app3_mgNameSelection').style.display='none';
+    callAPI('getReferrerInfo', code)
+      .then(function(data){
+        if(data&&data.success){
+          document.getElementById('app3_hoTenGT').value=data.hoTen||'';
+          document.getElementById('app3_daiBoPhan').value=data.daiBoPhan||'';
+          document.getElementById('app3_congXuongGT').value=data.congXuong||'';
+          document.getElementById('app3_khuGT').value=data.khu||'';
+          document.getElementById('app3_boPhanGT').value=data.boPhan||'';
+          document.getElementById('app3_chuyenGT').value=data.chuyen||'';
+          document.getElementById('app3_chucVuGT').value=data.chucVu||'';
+        }else{
+          app3ShowModal(data&&data.error?data.error:'Không tìm thấy mã số thẻ','error');
+          document.getElementById('app3_maGioiThieu').value='';
+          app3ClearReferrerInfo();
+        }
+      })
+      .catch(function(error){console.error('Lỗi lấy thông tin giới thiệu:',error);app3ShowModal('Lỗi tìm mã số thẻ','error');});
   }
 
   // ===== LƯU TOÀN BỘ =====
@@ -914,29 +797,22 @@
     app3IsProcessing=true;
     app3ShowLoading(true);
     var sessionToken=getSessionToken();
-    try{
-      google.script.run
-        .withSuccessHandler(function(result){
-          app3IsProcessing=false;
-          app3ShowLoading(false);
-          if(result&&result.success===true){
-            app3ShowModal('Lưu thành công!','success');
-            app3ResetAll();
-          }else{
-            app3ShowModal('Lỗi: '+(result&&result.error?result.error:'Không xác định'),'error');
-          }
-        })
-        .withFailureHandler(function(error){
-          app3IsProcessing=false;
-          app3ShowLoading(false);
-          app3ShowModal('Lỗi kết nối: '+error.message,'error');
-        })
-        .saveFullApplication(dataToSave,sessionToken);
-    }catch(error){
-      app3IsProcessing=false;
-      app3ShowLoading(false);
-      app3ShowModal('Lỗi: '+error.message,'error');
-    }
+    callAPI('saveFullApplication', dataToSave, sessionToken)
+      .then(function(result){
+        app3IsProcessing=false;
+        app3ShowLoading(false);
+        if(result&&result.success===true){
+          app3ShowModal('Lưu thành công!','success');
+          app3ResetAll();
+        }else{
+          app3ShowModal('Lỗi: '+(result&&result.error?result.error:'Không xác định'),'error');
+        }
+      })
+      .catch(function(error){
+        app3IsProcessing=false;
+        app3ShowLoading(false);
+        app3ShowModal('Lỗi kết nối: '+error.message,'error');
+      });
   }
 
   // ===== SETUP EVENT LISTENERS =====
@@ -971,7 +847,7 @@
     app3LoadCameras();
     app3SetupEventListeners();
     app3UpdateCCCDWarning();
-    console.log('✅ App 3 đã sẵn sàng - QR parse client side');
+    console.log('✅ App 3 đã sẵn sàng - QR đã sửa hoàn chỉnh');
   });
 </script>
 </body>

@@ -10,7 +10,7 @@
   <meta name="format-detection" content="telephone=no">
   <title>Dashboard - Thống kê tuyển dụng</title>
   <link rel="preconnect" href="https://cdnjs.cloudflare.com">
-  <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
+  <link rel="dns-prefetch" href="https://cdnjs.cloudflare">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
@@ -1126,6 +1126,24 @@
     return window.getCurrentSessionToken ? window.getCurrentSessionToken() : null;
   }
 
+  // ===== API CONFIG =====
+  const API_URL = 'https://script.google.com/macros/s/AKfycbwKVrFfGB6DyxpyoU6sAVD-9q2u5P7qe3dO1sPNd4fHdVWT6Eg10fldAkIoPt23Zz2-Mg/exec'; // ⚠️ THAY URL CỦA BẠN
+
+  async function callAPI(action, data, sessionToken = null) {
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action, data: data, sessionToken: sessionToken })
+      });
+      if (!response.ok) throw new Error('HTTP error! status: ' + response.status);
+      return await response.json();
+    } catch (error) {
+      console.error('API Error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   // ===== PHÁT HIỆN THIẾT BỊ =====
   var dashUA = navigator.userAgent ? navigator.userAgent.toLowerCase() : '';
   var dashIsIOS = /iphone|ipad|ipod/.test(dashUA);
@@ -1211,29 +1229,23 @@
       document.getElementById('dash_date').value = selectedDate;
     }
 
-    try {
-      google.script.run
-        .withSuccessHandler(function(result) {
-          dashShowLoading(false);
-          if (result && result.success) {
-            dashCurrentData = result;
-            dashUpdateStatsAndCharts(result);
-            dashRenderComparisonTable();
-          } else if (result && result.error) {
-            dashShowToast('Lỗi: ' + result.error, 'error');
-          } else {
-            dashShowToast('Lỗi tải dữ liệu', 'error');
-          }
-        })
-        .withFailureHandler(function(error) {
-          dashShowLoading(false);
-          dashShowToast('Lỗi kết nối: ' + error.message, 'error');
-        })
-        .getDashboardData(selectedDate);
-    } catch (error) {
-      dashShowLoading(false);
-      dashShowToast('Lỗi: ' + error.message, 'error');
-    }
+    callAPI('getDashboardData', selectedDate)
+      .then(function(result) {
+        dashShowLoading(false);
+        if (result && result.success) {
+          dashCurrentData = result;
+          dashUpdateStatsAndCharts(result);
+          dashRenderComparisonTable();
+        } else if (result && result.error) {
+          dashShowToast('Lỗi: ' + result.error, 'error');
+        } else {
+          dashShowToast('Lỗi tải dữ liệu', 'error');
+        }
+      })
+      .catch(function(error) {
+        dashShowLoading(false);
+        dashShowToast('Lỗi kết nối: ' + error.message, 'error');
+      });
   }
 
   // ===== UPDATE STATS AND CHARTS =====
@@ -1604,48 +1616,37 @@
     var yearSelect = document.getElementById('exportMasterYear');
     if (!yearSelect) return;
 
-    try {
-      google.script.run
-        .withSuccessHandler(function(result) {
-          yearSelect.innerHTML = '';
-          if (result.success && result.years && result.years.length > 0) {
-            for (var i = 0; i < result.years.length; i++) {
-              var opt = document.createElement('option');
-              opt.value = result.years[i];
-              opt.textContent = result.years[i];
-              yearSelect.appendChild(opt);
-            }
-          } else {
-            var currentYear = new Date().getFullYear();
-            for (var y = 2020; y <= currentYear + 1; y++) {
-              var opt = document.createElement('option');
-              opt.value = y;
-              opt.textContent = y;
-              yearSelect.appendChild(opt);
-            }
+    callAPI('getAvailableYears', null)
+      .then(function(result) {
+        yearSelect.innerHTML = '';
+        if (result.success && result.years && result.years.length > 0) {
+          for (var i = 0; i < result.years.length; i++) {
+            var opt = document.createElement('option');
+            opt.value = result.years[i];
+            opt.textContent = result.years[i];
+            yearSelect.appendChild(opt);
           }
-        })
-        .withFailureHandler(function() {
+        } else {
           var currentYear = new Date().getFullYear();
-          yearSelect.innerHTML = '';
           for (var y = 2020; y <= currentYear + 1; y++) {
             var opt = document.createElement('option');
             opt.value = y;
             opt.textContent = y;
             yearSelect.appendChild(opt);
           }
-        })
-        .getAvailableYearsInMaster();
-    } catch (error) {
-      var currentYear = new Date().getFullYear();
-      yearSelect.innerHTML = '';
-      for (var y = 2020; y <= currentYear + 1; y++) {
-        var opt = document.createElement('option');
-        opt.value = y;
-        opt.textContent = y;
-        yearSelect.appendChild(opt);
-      }
-    }
+        }
+      })
+      .catch(function(error) {
+        console.error('Lỗi lấy danh sách năm:', error);
+        var currentYear = new Date().getFullYear();
+        yearSelect.innerHTML = '';
+        for (var y = 2020; y <= currentYear + 1; y++) {
+          var opt = document.createElement('option');
+          opt.value = y;
+          opt.textContent = y;
+          yearSelect.appendChild(opt);
+        }
+      });
   }
 
   function confirmExportMaster() {
@@ -1687,42 +1688,36 @@
     dashShowLoading(true);
     var sessionToken = getSessionToken();
 
-    try {
-      google.script.run
-        .withSuccessHandler(function(result) {
-          dashShowLoading(false);
-          if (result && result.success && result.fileBase64) {
-            var byteCharacters = atob(result.fileBase64);
-            var byteNumbers = new Array(byteCharacters.length);
-            for (var i = 0; i < byteCharacters.length; i++) {
-              byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }
-            var byteArray = new Uint8Array(byteNumbers);
-            var blob = new Blob([byteArray], { type: 'application/vnd.ms-excel' });
-
-            var link = document.createElement('a');
-            var url = URL.createObjectURL(blob);
-            link.href = url;
-            link.setAttribute('download', result.fileName || 'NHAP_HO_SO.xls');
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-
-            dashShowToast('Đã xuất ' + (result.rowCount || 0) + ' dòng dữ liệu!', 'success');
-          } else {
-            dashShowToast((result && result.error) ? result.error : 'Không có dữ liệu để xuất', 'error');
+    callAPI('exportMasterSheet', { filterType: filterType, filterValue: filterValue }, sessionToken)
+      .then(function(result) {
+        dashShowLoading(false);
+        if (result && result.success && result.fileBase64) {
+          var byteCharacters = atob(result.fileBase64);
+          var byteNumbers = new Array(byteCharacters.length);
+          for (var i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
           }
-        })
-        .withFailureHandler(function(error) {
-          dashShowLoading(false);
-          dashShowToast('Lỗi xuất: ' + error.message, 'error');
-        })
-        .exportMasterSheetToExcel(filterType, filterValue, sessionToken);
-    } catch (error) {
-      dashShowLoading(false);
-      dashShowToast('Lỗi: ' + error.message, 'error');
-    }
+          var byteArray = new Uint8Array(byteNumbers);
+          var blob = new Blob([byteArray], { type: 'application/vnd.ms-excel' });
+
+          var link = document.createElement('a');
+          var url = URL.createObjectURL(blob);
+          link.href = url;
+          link.setAttribute('download', result.fileName || 'NHAP_HO_SO.xls');
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+
+          dashShowToast('Đã xuất ' + (result.rowCount || 0) + ' dòng dữ liệu!', 'success');
+        } else {
+          dashShowToast((result && result.error) ? result.error : 'Không có dữ liệu để xuất', 'error');
+        }
+      })
+      .catch(function(error) {
+        dashShowLoading(false);
+        dashShowToast('Lỗi xuất: ' + error.message, 'error');
+      });
   }
 
   // ===== EXPORT TYPE CHANGE =====

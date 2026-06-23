@@ -1480,22 +1480,61 @@
     // ============================================================
 
     // ===== API CONFIG =====
-    const API_URL = 'https://script.google.com/macros/s/AKfycbyxfAnI8lHF_BE02kyOLc2N6CK1iKD5HK-AM4i5pC_se0JUX8uTHEDlkonHuBcdYYIzww/exec';
+    // ===== API CONFIG =====
+const API_URL = 'https://script.google.com/macros/s/AKfycbzM1l29y1keCvh02ewS8t-ENfP_PWxxg7zGgq_34V-na9rvU7ePU-yd-DPsTJgOGqH-CQ/exec';
 
-    async function callAPI(action, data, sessionToken = null) {
-      try {
-        const response = await fetch(API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: action, data: data, sessionToken: sessionToken })
-        });
-        if (!response.ok) throw new Error('HTTP error! status: ' + response.status);
-        return await response.json();
-      } catch (error) {
-        console.error('API Error:', error);
-        return { success: false, error: error.message };
+async function callAPI(action, data, sessionToken = null, retries = 3) {
+  let lastError = null;
+  
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      console.log(`📤 [Attempt ${attempt + 1}/${retries}] ${action}:`, { data, sessionToken });
+      
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ 
+          action: action, 
+          data: data, 
+          sessionToken: sessionToken 
+        })
+      });
+      
+      console.log(`📥 Response status: ${response.status}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      console.log(`📥 Response data:`, result);
+      
+      if (result && result.success === false && result.error) {
+        console.warn(`⚠️ API returned error: ${result.error}`);
+      }
+      
+      return result;
+      
+    } catch (error) {
+      lastError = error;
+      console.error(`❌ API Error (attempt ${attempt + 1}):`, error);
+      
+      if (attempt < retries - 1) {
+        const delay = 1000 * Math.pow(2, attempt);
+        console.log(`⏳ Retry in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
+  }
+  
+  return { 
+    success: false, 
+    error: lastError ? lastError.message : 'Không thể kết nối đến server sau ' + retries + ' lần thử'
+  };
+}
 
     // ===== BIẾN TOÀN CỤC =====
     var currentSessionToken = null;
@@ -2276,7 +2315,67 @@
         if (!hasSession) { document.getElementById('loginScreen').style.display = 'flex'; }
       });
     });
+// Thêm vào DOMContentLoaded
+document.getElementById('debugBtn').addEventListener('click', function() {
+  var maSo = document.getElementById('staffMaSo').value.trim();
+  
+  if (!maSo) {
+    document.getElementById('loginError').innerHTML = '⚠️ Vui lòng nhập mã số để debug';
+    return;
+  }
+  
+  document.getElementById('loginError').innerHTML = '🔍 Đang kiểm tra...';
+  
+  callAPI('checkAccount', maSo).then(function(result) {
+    if (result && result.error) {
+      document.getElementById('loginError').innerHTML = '❌ Lỗi: ' + result.error;
+      return;
+    }
+    
+    var html = '<div style="text-align:left;font-size:11px;background:#f1f5f9;padding:10px;border-radius:8px;max-height:300px;overflow:auto;">';
+    html += '<strong>📊 Thông tin tài khoản:</strong><br>';
+    html += 'Tổng số tài khoản: ' + (result.totalAccounts || 0) + '<br>';
+    html += 'Tồn tại: ' + (result.exists ? '✅ Có' : '❌ Không') + '<br>';
+    
+    if (result.match) {
+      html += '<br><strong>🔍 Thông tin khớp:</strong><br>';
+      html += 'Mã số: ' + result.match.maSo + '<br>';
+      html += 'Họ tên: ' + (result.match.hoTen || 'Chưa có') + '<br>';
+      html += 'Loại: ' + (result.match.loai || '2') + '<br>';
+      html += 'Có hash: ' + (result.match.hasHash ? '✅' : '❌') + '<br>';
+      html += 'Hash preview: ' + (result.match.hashPreview || 'null') + '<br>';
+    }
+    
+    if (result.accounts && result.accounts.length > 0) {
+      html += '<br><strong>📋 Danh sách tài khoản:</strong><br>';
+      for (var i = 0; i < Math.min(10, result.accounts.length); i++) {
+        var acc = result.accounts[i];
+        html += '• ' + acc.maSo + ' - ' + (acc.hoTen || 'Chưa có tên') + ' (Hash: ' + (acc.hasHash ? '✅' : '❌') + ')<br>';
+      }
+      if (result.accounts.length > 10) {
+        html += '... và ' + (result.accounts.length - 10) + ' tài khoản khác<br>';
+      }
+    }
+    
+    html += '</div>';
+    document.getElementById('loginError').innerHTML = html;
+  }).catch(function(error) {
+    document.getElementById('loginError').innerHTML = '❌ Lỗi: ' + (error.message || 'Không xác định');
+  });
+});
 
+// Thêm nút seed tài khoản (chỉ dùng khi cần)
+document.getElementById('seedBtn') && document.getElementById('seedBtn').addEventListener('click', function() {
+  if (!confirm('Bạn có chắc muốn tạo lại dữ liệu tài khoản mẫu?')) return;
+  
+  callAPI('seedAccounts', null).then(function(result) {
+    if (result && result.success) {
+      document.getElementById('loginError').innerHTML = '✅ ' + (result.message || 'Đã tạo tài khoản mẫu!');
+    } else {
+      document.getElementById('loginError').innerHTML = '❌ Lỗi: ' + (result && result.error ? result.error : 'Không xác định');
+    }
+  });
+});
     // ===== EXPORT GLOBAL =====
     window.getCurrentSessionToken = getSessionToken;
     window.showGlobalLoading = showGlobalLoading;

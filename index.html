@@ -301,6 +301,8 @@
             <div class="debug-content">
               <button class="debug-btn" id="debugBtn"><i class="fas fa-search"></i> Kiểm tra tài khoản</button>
               <button class="debug-btn" id="seedBtn" style="background:#059669;"><i class="fas fa-database"></i> Tạo tài khoản mẫu</button>
+              <button class="debug-btn" id="testConnBtn" style="background:#4facfe;"><i class="fas fa-wifi"></i> Kiểm tra kết nối</button>
+              <button class="debug-btn" id="testCorsBtn" style="background:#f59e0b;"><i class="fas fa-shield-alt"></i> Kiểm tra CORS</button>
               <div id="debugResult" style="margin-top:8px;font-size:11px;color:#334155;"></div>
             </div>
           </details>
@@ -895,6 +897,7 @@
           </div>
         </div>
       </div>
+
       <!-- ===== APP 4 ===== -->
       <div id="app4" class="tab-content">
         <div class="app4-container">
@@ -1157,13 +1160,44 @@
   // ===== API CONFIG =====
   const API_URL = 'https://script.google.com/macros/s/AKfycbwUI3yhLOtJ__b_WKxNwECRHLBh58pRjHkNcmpttWIidWIjgKw_yUQMLGApDKUzn9WyPA/exec';
 
-  // ===== RETRY HELPER =====
+  // ===== OFFLINE MODE =====
+  let isOnline = true;
+
+  window.addEventListener('online', () => {
+    isOnline = true;
+    showGlobalToast('📶 Đã kết nối lại mạng!', 'success');
+  });
+
+  window.addEventListener('offline', () => {
+    isOnline = false;
+    showGlobalToast('📶 Mất kết nối mạng. Đang chuyển sang chế độ offline...', 'warning');
+  });
+
+  // ===== RETRY HELPER WITH CORS FIX & SESSION =====
   async function callAPI(action, data, sessionToken = null, retries = 3) {
+    // Kiểm tra online
+    if (!navigator.onLine) {
+      return { 
+        success: false, 
+        error: '📶 Không có kết nối mạng. Vui lòng kiểm tra internet.',
+        offline: true
+      };
+    }
+    
+    // Nếu không có sessionToken truyền vào, lấy từ bộ nhớ
+    if (!sessionToken) {
+      sessionToken = getSessionToken();
+    }
+    
     let lastError = null;
     
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
         console.log(`📤 [Attempt ${attempt + 1}/${retries}] ${action}:`, data);
+        
+        // Thêm timeout để tránh treo
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
         
         const response = await fetch(API_URL, {
           method: 'POST',
@@ -1174,9 +1208,14 @@
           body: JSON.stringify({ 
             action: action, 
             data: data, 
-            sessionToken: sessionToken 
-          })
+            sessionToken: sessionToken
+          }),
+          signal: controller.signal,
+          mode: 'cors',
+          credentials: 'omit'
         });
+        
+        clearTimeout(timeoutId);
         
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -1184,11 +1223,34 @@
         
         const result = await response.json();
         console.log(`📥 Response:`, result);
+        
+        // Kiểm tra session expired
+        if (result && result.valid === false && result.reason === 'Session expired') {
+          console.warn('⚠️ Session đã hết hạn!');
+          clearSession();
+          showGlobalToast('🔒 Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.', 'error');
+          setTimeout(() => {
+            document.getElementById('mainApp').style.display = 'none';
+            document.getElementById('loginScreen').style.display = 'flex';
+          }, 2000);
+          return { success: false, error: 'Session expired', sessionExpired: true };
+        }
+        
         return result;
         
       } catch (error) {
         lastError = error;
         console.error(`❌ API Error (attempt ${attempt + 1}):`, error);
+        
+        if (error.name === 'AbortError') {
+          lastError = new Error('⏱️ Timeout - Server không phản hồi sau 30 giây');
+        } else if (error.message.includes('Failed to fetch')) {
+          lastError = new Error('🌐 Không thể kết nối đến server. Kiểm tra URL API và kết nối mạng.');
+        } else if (error.message.includes('NetworkError')) {
+          lastError = new Error('📶 Lỗi mạng. Kiểm tra kết nối internet.');
+        } else if (error.message.includes('CORS')) {
+          lastError = new Error('🔒 Lỗi CORS. Vui lòng liên hệ quản trị viên.');
+        }
         
         if (attempt < retries - 1) {
           const delay = 1000 * Math.pow(2, attempt);
@@ -1202,6 +1264,84 @@
       success: false, 
       error: lastError ? lastError.message : 'Không thể kết nối đến server sau ' + retries + ' lần thử'
     };
+  }
+
+  // ===== SESSION HELPER =====
+  async function checkSessionBeforeAction(action, data) {
+    const sessionToken = getSessionToken();
+    
+    if (!sessionToken) {
+      showGlobalToast('🔒 Vui lòng đăng nhập để thực hiện thao tác này', 'warning');
+      return { success: false, error: 'No session', needLogin: true };
+    }
+    
+    try {
+      const result = await callAPI('checkSession', null, sessionToken);
+      
+      if (result && result.valid === true) {
+        return { success: true, sessionToken: sessionToken };
+      } else {
+        clearSession();
+        showGlobalToast('🔒 Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.', 'error');
+        setTimeout(() => {
+          document.getElementById('mainApp').style.display = 'none';
+          document.getElementById('loginScreen').style.display = 'flex';
+        }, 2000);
+        return { success: false, error: 'Session expired', needLogin: true };
+      }
+    } catch (error) {
+      console.error('❌ Lỗi kiểm tra session:', error);
+      return { success: false, error: error.message, needLogin: true };
+    }
+  }
+
+  // ===== WRAPPER CHO CÁC ACTION CẦN SESSION =====
+  async function callAPIWithSession(action, data) {
+    // Các action không cần session
+    const publicActions = ['doLogin', 'testConnection', 'checkAccount', 'seedAccounts', 'checkSession'];
+    
+    if (publicActions.includes(action)) {
+      return callAPI(action, data);
+    }
+    
+    // Kiểm tra session trước khi gọi
+    const sessionCheck = await checkSessionBeforeAction(action, data);
+    if (!sessionCheck.success) {
+      return { success: false, error: sessionCheck.error, needLogin: true };
+    }
+    
+    return callAPI(action, data, sessionCheck.sessionToken);
+  }
+
+  // ===== SESSION REFRESH =====
+  let sessionRefreshTimer = null;
+  const SESSION_REFRESH_INTERVAL = 300000; // 5 phút
+
+  function startSessionRefresh() {
+    if (sessionRefreshTimer) clearInterval(sessionRefreshTimer);
+    
+    sessionRefreshTimer = setInterval(async function() {
+      const token = getSessionToken();
+      if (!token) {
+        clearInterval(sessionRefreshTimer);
+        return;
+      }
+      
+      try {
+        const result = await callAPI('checkSession', null, token);
+        if (result && result.valid === false) {
+          clearSession();
+          showGlobalToast('🔒 Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.', 'error');
+          setTimeout(() => {
+            document.getElementById('mainApp').style.display = 'none';
+            document.getElementById('loginScreen').style.display = 'flex';
+          }, 2000);
+          clearInterval(sessionRefreshTimer);
+        }
+      } catch (error) {
+        console.warn('⚠️ Lỗi refresh session:', error);
+      }
+    }, SESSION_REFRESH_INTERVAL);
   }
 
   // ===== SESSION =====
@@ -1222,6 +1362,10 @@
   function clearSession() {
     try { localStorage.removeItem('sessionToken'); localStorage.removeItem('userInfo'); } catch(e) {}
     currentSessionToken = null; currentUserRole = null; currentUserLoai = null; currentUserHoTen = null;
+    if (sessionRefreshTimer) {
+      clearInterval(sessionRefreshTimer);
+      sessionRefreshTimer = null;
+    }
   }
 
   function loadSession() {
@@ -1268,6 +1412,63 @@
       var originalHtml = btn.getAttribute('data-original-html');
       if (originalHtml) btn.innerHTML = originalHtml;
       btn.removeAttribute('data-original-html');
+    }
+  }
+
+  // ===== TEST CONNECTION =====
+  async function testConnection() {
+    showGlobalLoading(true);
+    try {
+      const result = await callAPI('testConnection', null);
+      showGlobalLoading(false);
+      
+      if (result && result.status === 'success') {
+        showGlobalToast('✅ Kết nối thành công!', 'success');
+        return true;
+      } else {
+        showGlobalToast('❌ Kết nối thất bại: ' + (result?.error || 'Unknown'), 'error');
+        return false;
+      }
+    } catch (error) {
+      showGlobalLoading(false);
+      showGlobalToast('❌ Lỗi: ' + error.message, 'error');
+      return false;
+    }
+  }
+
+  // ===== CORS TEST =====
+  async function testCORS() {
+    showGlobalLoading(true);
+    try {
+      const response = await fetch(API_URL, {
+        method: 'OPTIONS',
+        headers: {
+          'Origin': window.location.origin,
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Headers': 'Content-Type'
+        }
+      });
+      showGlobalLoading(false);
+      
+      const corsHeaders = {
+        'Access-Control-Allow-Origin': response.headers.get('Access-Control-Allow-Origin'),
+        'Access-Control-Allow-Methods': response.headers.get('Access-Control-Allow-Methods'),
+        'Access-Control-Allow-Headers': response.headers.get('Access-Control-Allow-Headers')
+      };
+      
+      console.log('CORS Headers:', corsHeaders);
+      
+      if (corsHeaders['Access-Control-Allow-Origin']) {
+        showGlobalToast('✅ CORS OK - Server cho phép truy cập', 'success');
+      } else {
+        showGlobalToast('⚠️ CORS Warning - Server không trả về CORS headers', 'warning');
+      }
+      
+      return corsHeaders;
+    } catch (error) {
+      showGlobalLoading(false);
+      showGlobalToast('❌ CORS Error: ' + error.message, 'error');
+      return null;
     }
   }
 
@@ -1922,9 +2123,8 @@
       document.getElementById('app1_permanentAddress').value.trim()
     ];
     
-    var sessionToken = getSessionToken();
-    
-    callAPI('saveToSheet', formData, sessionToken).then(function(result) {
+    // ✅ Dùng callAPIWithSession
+    callAPIWithSession('saveToSheet', formData).then(function(result) {
       app1ShowLoading(false);
       btn.disabled = false;
       btn.innerHTML = '<i class="fas fa-paper-plane"></i> GỬI THÔNG TIN';
@@ -1955,6 +2155,9 @@
           el.classList.remove('valid', 'invalid');
         });
       } else {
+        if (result && result.needLogin) {
+          return;
+        }
         msgDiv.className = 'app1-message error';
         msgDiv.innerHTML = '<i class="fas fa-exclamation-triangle"></i> '+(result && result.message ? result.message : 'Có lỗi xảy ra');
         app1ShowToast(result && result.message ? result.message : 'Lỗi', 'error');
@@ -2204,8 +2407,1261 @@
     
     console.log('✅ App 1 đã sẵn sàng');
   }
+  // ============================================================
+  // MAIN SCRIPT - FIXED VERSION - COMPLETE
+  // ============================================================
 
-  // ===== APP 2 - SCAN ID (đầy đủ) =====
+  // ===== API CONFIG =====
+  const API_URL = 'https://script.google.com/macros/s/AKfycbwjYIYAHUa5AOe8BIWar7LQZ_SdwUvHj3NiZd8KzZHo1njJf2E9WyzMxfeDxn-9MwKwpQ/exec';
+
+  // ===== OFFLINE MODE =====
+  let isOnline = true;
+
+  window.addEventListener('online', () => {
+    isOnline = true;
+    showGlobalToast('📶 Đã kết nối lại mạng!', 'success');
+  });
+
+  window.addEventListener('offline', () => {
+    isOnline = false;
+    showGlobalToast('📶 Mất kết nối mạng. Đang chuyển sang chế độ offline...', 'warning');
+  });
+
+  // ===== RETRY HELPER WITH CORS FIX & SESSION =====
+  async function callAPI(action, data, sessionToken = null, retries = 3) {
+    // Kiểm tra online
+    if (!navigator.onLine) {
+      return { 
+        success: false, 
+        error: '📶 Không có kết nối mạng. Vui lòng kiểm tra internet.',
+        offline: true
+      };
+    }
+    
+    // Nếu không có sessionToken truyền vào, lấy từ bộ nhớ
+    if (!sessionToken) {
+      sessionToken = getSessionToken();
+    }
+    
+    let lastError = null;
+    
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        console.log(`📤 [Attempt ${attempt + 1}/${retries}] ${action}:`, data);
+        
+        // Thêm timeout để tránh treo
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({ 
+            action: action, 
+            data: data, 
+            sessionToken: sessionToken
+          }),
+          signal: controller.signal,
+          mode: 'cors',
+          credentials: 'omit'
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const result = await response.json();
+        console.log(`📥 Response:`, result);
+        
+        // Kiểm tra session expired
+        if (result && result.valid === false && result.reason === 'Session expired') {
+          console.warn('⚠️ Session đã hết hạn!');
+          clearSession();
+          showGlobalToast('🔒 Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.', 'error');
+          setTimeout(() => {
+            document.getElementById('mainApp').style.display = 'none';
+            document.getElementById('loginScreen').style.display = 'flex';
+          }, 2000);
+          return { success: false, error: 'Session expired', sessionExpired: true };
+        }
+        
+        return result;
+        
+      } catch (error) {
+        lastError = error;
+        console.error(`❌ API Error (attempt ${attempt + 1}):`, error);
+        
+        if (error.name === 'AbortError') {
+          lastError = new Error('⏱️ Timeout - Server không phản hồi sau 30 giây');
+        } else if (error.message.includes('Failed to fetch')) {
+          lastError = new Error('🌐 Không thể kết nối đến server. Kiểm tra URL API và kết nối mạng.');
+        } else if (error.message.includes('NetworkError')) {
+          lastError = new Error('📶 Lỗi mạng. Kiểm tra kết nối internet.');
+        } else if (error.message.includes('CORS')) {
+          lastError = new Error('🔒 Lỗi CORS. Vui lòng liên hệ quản trị viên.');
+        }
+        
+        if (attempt < retries - 1) {
+          const delay = 1000 * Math.pow(2, attempt);
+          console.log(`⏳ Retry in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    
+    return { 
+      success: false, 
+      error: lastError ? lastError.message : 'Không thể kết nối đến server sau ' + retries + ' lần thử'
+    };
+  }
+
+  // ===== SESSION HELPER =====
+  async function checkSessionBeforeAction(action, data) {
+    const sessionToken = getSessionToken();
+    
+    if (!sessionToken) {
+      showGlobalToast('🔒 Vui lòng đăng nhập để thực hiện thao tác này', 'warning');
+      return { success: false, error: 'No session', needLogin: true };
+    }
+    
+    try {
+      const result = await callAPI('checkSession', null, sessionToken);
+      
+      if (result && result.valid === true) {
+        return { success: true, sessionToken: sessionToken };
+      } else {
+        clearSession();
+        showGlobalToast('🔒 Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.', 'error');
+        setTimeout(() => {
+          document.getElementById('mainApp').style.display = 'none';
+          document.getElementById('loginScreen').style.display = 'flex';
+        }, 2000);
+        return { success: false, error: 'Session expired', needLogin: true };
+      }
+    } catch (error) {
+      console.error('❌ Lỗi kiểm tra session:', error);
+      return { success: false, error: error.message, needLogin: true };
+    }
+  }
+
+  // ===== WRAPPER CHO CÁC ACTION CẦN SESSION =====
+  async function callAPIWithSession(action, data) {
+    // Các action không cần session
+    const publicActions = ['doLogin', 'testConnection', 'checkAccount', 'seedAccounts', 'checkSession'];
+    
+    if (publicActions.includes(action)) {
+      return callAPI(action, data);
+    }
+    
+    // Kiểm tra session trước khi gọi
+    const sessionCheck = await checkSessionBeforeAction(action, data);
+    if (!sessionCheck.success) {
+      return { success: false, error: sessionCheck.error, needLogin: true };
+    }
+    
+    return callAPI(action, data, sessionCheck.sessionToken);
+  }
+
+  // ===== SESSION REFRESH =====
+  let sessionRefreshTimer = null;
+  const SESSION_REFRESH_INTERVAL = 300000; // 5 phút
+
+  function startSessionRefresh() {
+    if (sessionRefreshTimer) clearInterval(sessionRefreshTimer);
+    
+    sessionRefreshTimer = setInterval(async function() {
+      const token = getSessionToken();
+      if (!token) {
+        clearInterval(sessionRefreshTimer);
+        return;
+      }
+      
+      try {
+        const result = await callAPI('checkSession', null, token);
+        if (result && result.valid === false) {
+          clearSession();
+          showGlobalToast('🔒 Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.', 'error');
+          setTimeout(() => {
+            document.getElementById('mainApp').style.display = 'none';
+            document.getElementById('loginScreen').style.display = 'flex';
+          }, 2000);
+          clearInterval(sessionRefreshTimer);
+        }
+      } catch (error) {
+        console.warn('⚠️ Lỗi refresh session:', error);
+      }
+    }, SESSION_REFRESH_INTERVAL);
+  }
+
+  // ===== SESSION =====
+  var currentSessionToken = null;
+  var currentUserRole = null;
+  var currentUserLoai = null;
+  var currentUserHoTen = null;
+  var currentMaSo = null;
+  var toastTimeout = null;
+
+  function getSessionToken() { return currentSessionToken; }
+  window.getCurrentSessionToken = getSessionToken;
+
+  function saveSession(token, userInfo) {
+    try { localStorage.setItem('sessionToken', token); localStorage.setItem('userInfo', JSON.stringify(userInfo)); } catch(e) {}
+  }
+
+  function clearSession() {
+    try { localStorage.removeItem('sessionToken'); localStorage.removeItem('userInfo'); } catch(e) {}
+    currentSessionToken = null; currentUserRole = null; currentUserLoai = null; currentUserHoTen = null;
+    if (sessionRefreshTimer) {
+      clearInterval(sessionRefreshTimer);
+      sessionRefreshTimer = null;
+    }
+  }
+
+  function loadSession() {
+    try { 
+      var token = localStorage.getItem('sessionToken'); 
+      var userInfoStr = localStorage.getItem('userInfo'); 
+      if (token && userInfoStr) { 
+        var userInfo = JSON.parse(userInfoStr); 
+        return { token: token, userInfo: userInfo }; 
+      } 
+    } catch(e) {}
+    return null;
+  }
+
+  // ===== TOAST & LOADING =====
+  function showGlobalLoading(show) {
+    var el = document.getElementById('globalLoading');
+    if (el) el.classList.toggle('active', show);
+  }
+
+  function showGlobalToast(msg, type) {
+    var toast = document.getElementById('globalToast');
+    if (!toast) return;
+    if (toastTimeout) clearTimeout(toastTimeout);
+    
+    toast.textContent = msg;
+    toast.style.backgroundColor = type === 'success' ? '#10b981' : 
+                                 (type === 'error' ? '#ef4444' : 
+                                 (type === 'warning' ? '#f59e0b' : '#1e293b'));
+    toast.style.display = 'block';
+    
+    toastTimeout = setTimeout(function() { toast.style.display = 'none'; }, 3500);
+  }
+
+  function setButtonLoading(btn, isLoading) {
+    if (!btn) return;
+    if (isLoading) {
+      btn.disabled = true;
+      var originalHtml = btn.innerHTML;
+      btn.setAttribute('data-original-html', originalHtml);
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ĐANG XỬ LÝ...';
+    } else {
+      btn.disabled = false;
+      var originalHtml = btn.getAttribute('data-original-html');
+      if (originalHtml) btn.innerHTML = originalHtml;
+      btn.removeAttribute('data-original-html');
+    }
+  }
+
+  // ===== TEST CONNECTION =====
+  async function testConnection() {
+    showGlobalLoading(true);
+    try {
+      const result = await callAPI('testConnection', null);
+      showGlobalLoading(false);
+      
+      if (result && result.status === 'success') {
+        showGlobalToast('✅ Kết nối thành công!', 'success');
+        return true;
+      } else {
+        showGlobalToast('❌ Kết nối thất bại: ' + (result?.error || 'Unknown'), 'error');
+        return false;
+      }
+    } catch (error) {
+      showGlobalLoading(false);
+      showGlobalToast('❌ Lỗi: ' + error.message, 'error');
+      return false;
+    }
+  }
+
+  // ===== CORS TEST =====
+  async function testCORS() {
+    showGlobalLoading(true);
+    try {
+      const response = await fetch(API_URL, {
+        method: 'OPTIONS',
+        headers: {
+          'Origin': window.location.origin,
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Headers': 'Content-Type'
+        }
+      });
+      showGlobalLoading(false);
+      
+      const corsHeaders = {
+        'Access-Control-Allow-Origin': response.headers.get('Access-Control-Allow-Origin'),
+        'Access-Control-Allow-Methods': response.headers.get('Access-Control-Allow-Methods'),
+        'Access-Control-Allow-Headers': response.headers.get('Access-Control-Allow-Headers')
+      };
+      
+      console.log('CORS Headers:', corsHeaders);
+      
+      if (corsHeaders['Access-Control-Allow-Origin']) {
+        showGlobalToast('✅ CORS OK - Server cho phép truy cập', 'success');
+      } else {
+        showGlobalToast('⚠️ CORS Warning - Server không trả về CORS headers', 'warning');
+      }
+      
+      return corsHeaders;
+    } catch (error) {
+      showGlobalLoading(false);
+      showGlobalToast('❌ CORS Error: ' + error.message, 'error');
+      return null;
+    }
+  }
+
+  // ===== APP 1 HELPERS =====
+  function app1ShowToast(msg, type) {
+    var t = document.getElementById('app1_toast');
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'app1_toast';
+      t.className = 'app1-toast';
+      document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    t.style.backgroundColor = type === 'success' ? '#10b981' : (type === 'error' ? '#ef4444' : '#1e293b');
+    t.style.display = 'block';
+    setTimeout(function() { t.style.display = 'none'; }, 4000);
+  }
+
+  function app1ShowQRStatus(msg, type) {
+    var s = document.getElementById('app1_qrStatus');
+    if (!s) return;
+    var icon = type === 'success' ? 'check-circle' : (type === 'error' ? 'exclamation-circle' : 'info-circle');
+    s.innerHTML = '<i class="fas fa-'+icon+'"></i> '+msg;
+    s.className = 'app1-qr-status '+type;
+    setTimeout(function(){ if(s.style.display !== 'none') s.style.display = 'none'; }, 5000);
+  }
+
+  function app1ShowLoading(show) {
+    var l = document.getElementById('app1_loadingOverlay');
+    if (!l) {
+      l = document.createElement('div');
+      l.id = 'app1_loadingOverlay';
+      l.className = 'app1-loading-overlay';
+      l.innerHTML = '<div class="app1-loading-content"><i class="fas fa-circle-notch fa-spin"></i><p>ĐANG XỬ LÝ...</p></div>';
+      document.body.appendChild(l);
+    }
+    if (show) l.classList.add('active');
+    else l.classList.remove('active');
+  }
+
+  function app1SetValidationIcon(fieldId, isValid) {
+    var icon = document.getElementById(fieldId + '-icon');
+    var input = document.getElementById(fieldId);
+    if (!icon) return;
+    if (isValid === true) {
+      icon.innerHTML = '<i class="fas fa-check-circle" style="color:#10b981;"></i>';
+      if (input) { input.classList.add('valid'); input.classList.remove('invalid'); }
+    } else if (isValid === false) {
+      icon.innerHTML = '<i class="fas fa-exclamation-circle" style="color:#ef4444;"></i>';
+      if (input) { input.classList.add('invalid'); input.classList.remove('valid'); }
+    } else {
+      icon.innerHTML = '';
+      if (input) { input.classList.remove('valid', 'invalid'); }
+    }
+  }
+
+  function app1CapitalizeName(str) {
+    if (!str) return str;
+    return str.toLowerCase().replace(/(^|\s)\S/g, function(m) {
+      return m.toUpperCase();
+    });
+  }
+
+  function app1FormatDateFromQR(dateStr) {
+    if (!dateStr) return '';
+    var s = dateStr.toString().trim();
+    if (s.length === 8 && /^\d{8}$/.test(s)) {
+      return s.substring(0,2) + '-' + s.substring(2,4) + '-' + s.substring(4,8);
+    }
+    if (/^\d{2}-\d{2}-\d{4}$/.test(s)) return s;
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+      return s.substring(0,2) + '-' + s.substring(3,5) + '-' + s.substring(6,10);
+    }
+    return s;
+  }
+
+  function app1NormalizeCCCD(cccd) {
+    if (!cccd) return '';
+    var str = cccd.toString().trim().replace(/[^0-9]/g, '');
+    while (str.length > 0 && str.length < 12) str = '0' + str;
+    return str;
+  }
+
+  function app1ValidateAddressFormat(address) {
+    if (!address || address.trim() === '') return { valid: false, message: 'Địa chỉ thường trú không được để trống' };
+    var trimmed = address.trim();
+    var commaCount = (trimmed.match(/,/g) || []).length;
+    if (commaCount < 2) {
+      return { valid: false, message: 'Địa chỉ phải có ít nhất 2 dấu phẩy' };
+    }
+    return { valid: true, message: '' };
+  }
+
+  // ===== APP 1 - VALIDATION =====
+  var app1FormValid = {
+    cccd: false, fullName: false, hometown: false, gender: false,
+    expiryDate: false, issuedBy: false, ethnicity: false, religion: false,
+    education: false, maritalStatus: false, personalPhone: false,
+    relativePhone: false, relationship: false, source: false, workshop: false,
+    agreement: false, birthDate: true, issueDate: true, permanentAddress: false
+  };
+  var app1ExpiryDateValid = false;
+
+  function app1UpdateSubmitButton() {
+    var allValid = true;
+    for (var key in app1FormValid) {
+      if (app1FormValid.hasOwnProperty(key) && app1FormValid[key] !== true) {
+        allValid = false;
+        break;
+      }
+    }
+    var finalValid = allValid && app1ExpiryDateValid;
+    document.getElementById('app1_submitBtn').disabled = !finalValid;
+  }
+
+  function app1ValidateCCCD() {
+    var value = document.getElementById('app1_cccd').value.trim();
+    var isValid = /^\d{12}$/.test(value);
+    app1SetValidationIcon('app1_cccd', isValid);
+    app1FormValid.cccd = isValid;
+    
+    if (isValid && value) {
+      callAPI('decodeCCCD', value).then(function(result) {
+        if (result && result.success) {
+          var div = document.getElementById('app1_cccd-decoded');
+          div.style.display = 'block';
+          div.innerHTML = '<i class="fas fa-info-circle"></i> Giới tính: ' + result.gender + ' | Năm sinh: ' + result.fullBirthYear;
+          
+          if (result.gender) {
+            var genderSelect = document.getElementById('app1_gender');
+            if (result.gender === 'NAM') genderSelect.value = 'Nam';
+            else if (result.gender === 'NỮ') genderSelect.value = 'Nữ';
+            app1ValidateGender();
+          }
+        }
+      }).catch(function(error) {
+        console.error('Lỗi decode CCCD:', error);
+      });
+    } else {
+      document.getElementById('app1_cccd-decoded').style.display = 'none';
+    }
+    
+    app1UpdateSubmitButton();
+    return isValid;
+  }
+
+  function app1ValidateFullName() {
+    var value = document.getElementById('app1_fullName').value.trim();
+    var isValid = value !== '';
+    app1SetValidationIcon('app1_fullName', isValid);
+    app1FormValid.fullName = isValid;
+    app1UpdateSubmitButton();
+    return isValid;
+  }
+
+  function app1ValidateHometown() {
+    var value = document.getElementById('app1_hometown').value;
+    var isValid = value !== '';
+    app1SetValidationIcon('app1_hometown', isValid);
+    app1FormValid.hometown = isValid;
+    app1UpdateSubmitButton();
+    return isValid;
+  }
+
+  function app1ValidateGender() {
+    var value = document.getElementById('app1_gender').value;
+    var isValid = value !== '';
+    app1SetValidationIcon('app1_gender', isValid);
+    app1FormValid.gender = isValid;
+    app1UpdateSubmitButton();
+    return isValid;
+  }
+
+  function app1ValidateExpiryDate() {
+    var value = document.getElementById('app1_expiryDate').value.trim();
+    var isValid = /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[012])\/(19|20)\d\d$/.test(value);
+    app1SetValidationIcon('app1_expiryDate', isValid);
+    app1FormValid.expiryDate = isValid;
+    
+    var infoDiv = document.getElementById('app1_expiryDate-info');
+    if (isValid && value) {
+      var cccd = document.getElementById('app1_cccd').value;
+      if (cccd.length === 12) {
+        infoDiv.style.display = 'block';
+        infoDiv.innerHTML = '<i class="fas fa-spinner fa-pulse"></i> Đang kiểm tra...';
+        infoDiv.style.background = '#fef3c7';
+        infoDiv.style.padding = '6px 10px';
+        infoDiv.style.borderRadius = '8px';
+        infoDiv.style.fontSize = '11px';
+        
+        callAPI('validateExpiryDate', { cccd: cccd, expiryDate: value }).then(function(result) {
+          if (result.valid) {
+            infoDiv.innerHTML = '<i class="fas fa-check-circle"></i> '+result.message;
+            infoDiv.style.background = '#d1fae5';
+            infoDiv.style.color = '#065f46';
+            app1ExpiryDateValid = true;
+          } else {
+            infoDiv.innerHTML = '<i class="fas fa-exclamation-triangle"></i> '+result.message;
+            infoDiv.style.background = '#fee2e2';
+            infoDiv.style.color = '#991b1b';
+            app1ExpiryDateValid = false;
+          }
+          app1UpdateSubmitButton();
+        }).catch(function(error) {
+          console.error('Lỗi kiểm tra ngày hết hạn:', error);
+        });
+      }
+    } else {
+      infoDiv.style.display = 'none';
+      app1ExpiryDateValid = false;
+    }
+    app1UpdateSubmitButton();
+    return isValid;
+  }
+
+  function app1ValidateIssuedBy() {
+    var value = document.getElementById('app1_issuedBy').value;
+    var isValid = value !== '';
+    app1SetValidationIcon('app1_issuedBy', isValid);
+    app1FormValid.issuedBy = isValid;
+    app1UpdateSubmitButton();
+    return isValid;
+  }
+
+  function app1ValidateEthnicity() {
+    var value = document.getElementById('app1_ethnicity').value;
+    var isValid = value !== '';
+    app1SetValidationIcon('app1_ethnicity', isValid);
+    app1FormValid.ethnicity = isValid;
+    app1UpdateSubmitButton();
+    return isValid;
+  }
+
+  function app1ValidateReligion() {
+    var value = document.getElementById('app1_religion').value;
+    var isValid = value !== '';
+    app1SetValidationIcon('app1_religion', isValid);
+    app1FormValid.religion = isValid;
+    app1UpdateSubmitButton();
+    return isValid;
+  }
+
+  function app1ValidateEducation() {
+    var value = document.getElementById('app1_education').value;
+    var isValid = value !== '';
+    app1SetValidationIcon('app1_education', isValid);
+    app1FormValid.education = isValid;
+    app1UpdateSubmitButton();
+    return isValid;
+  }
+
+  function app1ValidateMaritalStatus() {
+    var value = document.getElementById('app1_maritalStatus').value;
+    var isValid = value !== '';
+    app1SetValidationIcon('app1_maritalStatus', isValid);
+    app1FormValid.maritalStatus = isValid;
+    app1UpdateSubmitButton();
+    return isValid;
+  }
+
+  function app1ValidatePersonalPhone() {
+    var value = document.getElementById('app1_personalPhone').value.trim();
+    var isValid = /^\d{10}$/.test(value);
+    app1SetValidationIcon('app1_personalPhone', isValid);
+    app1FormValid.personalPhone = isValid;
+    app1UpdateSubmitButton();
+    return isValid;
+  }
+
+  function app1ValidateRelativePhone() {
+    var value = document.getElementById('app1_relativePhone').value.trim();
+    var isValid = /^\d{10}$/.test(value);
+    app1SetValidationIcon('app1_relativePhone', isValid);
+    app1FormValid.relativePhone = isValid;
+    
+    var personalPhone = document.getElementById('app1_personalPhone').value.trim();
+    if (value && value === personalPhone) {
+      app1SetValidationIcon('app1_relativePhone', false);
+      app1FormValid.relativePhone = false;
+    }
+    app1UpdateSubmitButton();
+    return isValid;
+  }
+
+  function app1ValidateRelationship() {
+    var value = document.getElementById('app1_relationship').value;
+    var isValid = value !== '';
+    app1SetValidationIcon('app1_relationship', isValid);
+    app1FormValid.relationship = isValid;
+    app1UpdateSubmitButton();
+    return isValid;
+  }
+
+  function app1ValidateSource() {
+    var value = document.getElementById('app1_source').value;
+    var isValid = value !== '';
+    app1SetValidationIcon('app1_source', isValid);
+    app1FormValid.source = isValid;
+    app1UpdateSubmitButton();
+    return isValid;
+  }
+
+  function app1ValidateWorkshop() {
+    var value = document.getElementById('app1_workshop').value;
+    var isValid = value !== '';
+    app1SetValidationIcon('app1_workshop', isValid);
+    app1FormValid.workshop = isValid;
+    app1UpdateSubmitButton();
+    return isValid;
+  }
+
+  function app1ValidatePermanentAddress() {
+    var value = document.getElementById('app1_permanentAddress').value.trim();
+    var validation = app1ValidateAddressFormat(value);
+    var isValid = validation.valid;
+    app1SetValidationIcon('app1_permanentAddress', isValid);
+    app1FormValid.permanentAddress = isValid;
+    
+    var warningDiv = document.getElementById('app1_addressWarning');
+    if (warningDiv) {
+      if (!isValid && value !== '') {
+        warningDiv.style.display = 'block';
+        warningDiv.innerHTML = '⚠️ '+validation.message;
+      } else {
+        warningDiv.style.display = 'none';
+      }
+    }
+    app1UpdateSubmitButton();
+    return isValid;
+  }
+
+  // ===== APP 1 - FILL FORM FROM QR =====
+  function app1FillFormFromQR(data) {
+    console.log('📝 Điền dữ liệu từ QR:', data);
+    
+    var filled = [];
+    
+    if (data.soCCCD) {
+      var cccdVal = app1NormalizeCCCD(data.soCCCD);
+      if (cccdVal) {
+        document.getElementById('app1_cccd').value = cccdVal;
+        app1ValidateCCCD();
+        filled.push('CCCD');
+      }
+    }
+    
+    if (data.hoTen) {
+      document.getElementById('app1_fullName').value = app1CapitalizeName(data.hoTen);
+      app1ValidateFullName();
+      filled.push('Họ tên');
+    }
+    
+    if (data.gioiTinh) {
+      var genderSelect = document.getElementById('app1_gender');
+      var gv = data.gioiTinh.toLowerCase();
+      if (gv === 'nam') genderSelect.value = 'Nam';
+      else if (gv === 'nữ' || gv === 'nu') genderSelect.value = 'Nữ';
+      else genderSelect.value = data.gioiTinh;
+      app1ValidateGender();
+      filled.push('Giới tính');
+    }
+    
+    if (data.ngaySinh) {
+      var birth = app1FormatDateFromQR(data.ngaySinh);
+      if (birth) {
+        document.getElementById('app1_birthDate').value = birth;
+        filled.push('Ngày sinh');
+      }
+    }
+    
+    if (data.ngayCapCCCD || data.ngayCap) {
+      var issue = app1FormatDateFromQR(data.ngayCapCCCD || data.ngayCap);
+      if (issue) {
+        document.getElementById('app1_issueDate').value = issue;
+        filled.push('Ngày cấp');
+      }
+    }
+    
+    if (data.noiThuongTru) {
+      document.getElementById('app1_permanentAddress').value = data.noiThuongTru;
+      app1ValidatePermanentAddress();
+      filled.push('Địa chỉ');
+    }
+    
+    if (filled.length > 0) {
+      app1ShowToast('✅ Đã tự động điền: ' + filled.join(', '), 'success');
+      app1ShowQRStatus('✅ Đã điền ' + filled.length + ' trường từ QR', 'success');
+    } else {
+      app1ShowToast('⚠️ Không có thông tin nào được điền từ QR', 'warning');
+      app1ShowQRStatus('⚠️ Không có dữ liệu để điền', 'warning');
+    }
+  }
+
+  // ===== APP 1 - QR HANDLER =====
+  function app1HandleQRCode(content) {
+    if (!content) {
+      app1ShowQRStatus('❌ Nội dung QR trống', 'error');
+      return;
+    }
+    
+    console.log('📷 QR Code content:', content);
+    app1ShowQRStatus('📷 Đã đọc mã QR, đang xử lý...', 'info');
+    
+    callAPI('parseQRData', { rawText: content }).then(function(parsedData) {
+      console.log('✅ Server response:', parsedData);
+      
+      if (parsedData && parsedData.success) {
+        app1FillFormFromQR(parsedData);
+        app1ShowQRStatus('✅ Đã đọc QR thành công!', 'success');
+        app1ShowToast('Đã đọc QR thành công!', 'success');
+        
+        if (app1IsScanning) {
+          setTimeout(function() {
+            app1StopScanner();
+          }, 1000);
+        }
+      } else {
+        var errorMsg = parsedData && parsedData.error ? parsedData.error : 'Không thể đọc QR code';
+        app1ShowQRStatus('❌ ' + errorMsg, 'error');
+        app1ShowToast('Lỗi đọc QR: ' + errorMsg, 'error');
+      }
+    }).catch(function(error) {
+      console.error('❌ Error:', error);
+      app1ShowQRStatus('❌ Lỗi server: ' + (error.message || 'Không xác định'), 'error');
+      app1ShowToast('Lỗi server: ' + (error.message || 'Không xác định'), 'error');
+    });
+  }
+
+  // ===== APP 1 - SCANNER =====
+  var app1Html5QrCode = null;
+  var app1IsScanning = false;
+  var app1CurrentCameraId = null;
+
+  async function app1LoadCameras() {
+    var select = document.getElementById('app1_cameraSelect');
+    if (!select) return;
+    
+    select.innerHTML = '<option value="">Đang tải camera...</option>';
+    
+    try {
+      var devices = await Html5Qrcode.getCameras();
+      select.innerHTML = '<option value="">-- Chọn camera --</option>';
+      
+      if (!devices || devices.length === 0) {
+        select.innerHTML = '<option value="">Không tìm thấy camera</option>';
+        app1ShowQRStatus('❌ Không tìm thấy camera', 'error');
+        return;
+      }
+      
+      var backCamera = null, frontCamera = null;
+      
+      for (var i = 0; i < devices.length; i++) {
+        var option = document.createElement('option');
+        option.value = devices[i].id;
+        var name = devices[i].label || 'Camera ' + (i + 1);
+        var labelLower = name.toLowerCase();
+        
+        if (labelLower.indexOf('front') !== -1 || /face|0/i.test(labelLower)) {
+          name = '📱 Camera trước';
+          frontCamera = devices[i];
+        } else if (labelLower.indexOf('back') !== -1 || labelLower.indexOf('rear') !== -1 || /environment|1|2/i.test(labelLower)) {
+          name = '📷 Camera sau';
+          backCamera = devices[i];
+        } else {
+          name = '📸 Camera ' + (i + 1);
+        }
+        
+        option.text = name;
+        select.appendChild(option);
+      }
+      
+      if (backCamera) {
+        select.value = backCamera.id;
+        app1CurrentCameraId = backCamera.id;
+      } else if (frontCamera) {
+        select.value = frontCamera.id;
+        app1CurrentCameraId = frontCamera.id;
+      } else if (devices.length > 0) {
+        select.value = devices[0].id;
+        app1CurrentCameraId = devices[0].id;
+      }
+      
+      app1ShowQRStatus('✅ Tìm thấy ' + devices.length + ' camera', 'success');
+    } catch(error) {
+      console.error('❌ Lỗi load cameras:', error);
+      select.innerHTML = '<option value="">Lỗi tải camera</option>';
+      app1ShowQRStatus('❌ Lỗi truy cập camera', 'error');
+    }
+  }
+
+  async function app1StartScanner() {
+    if (app1IsScanning) {
+      app1ShowToast('Camera đang chạy!', 'info');
+      return;
+    }
+    
+    var camId = document.getElementById('app1_cameraSelect').value;
+    if (!camId) {
+      app1ShowToast('Vui lòng chọn camera', 'warning');
+      return;
+    }
+    
+    app1CurrentCameraId = camId;
+    
+    try {
+      await app1CleanupScanner();
+      
+      app1Html5QrCode = new Html5Qrcode("app1_reader");
+      
+      var config = {
+        fps: 15,
+        qrbox: { width: 200, height: 200 },
+        aspectRatio: 1.0,
+        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_QR_CODE]
+      };
+      
+      app1ShowQRStatus('🔍 Đang khởi động camera...', 'info');
+      
+      try {
+        await app1Html5QrCode.start(
+          { deviceId: { exact: camId } },
+          config,
+          app1HandleQRCode,
+          function(error) { /* Ignore scan errors */ }
+        );
+      } catch(firstError) {
+        console.log('Fallback: thử camera không exact');
+        await app1Html5QrCode.start(
+          camId,
+          config,
+          app1HandleQRCode,
+          function(error) { /* Ignore scan errors */ }
+        );
+      }
+      
+      app1IsScanning = true;
+      app1ShowQRStatus('📷 Đang quét... Đưa mã QR vào khung hình', 'success');
+      app1ShowToast('Camera đã khởi động', 'success');
+      
+    } catch(error) {
+      console.error('❌ Lỗi khởi động camera:', error);
+      app1ShowQRStatus('❌ Lỗi camera: ' + error.message, 'error');
+      app1ShowToast('Không thể khởi động camera', 'error');
+      app1IsScanning = false;
+    }
+  }
+
+  async function app1StopScanner() {
+    if (app1Html5QrCode && app1IsScanning) {
+      try {
+        await app1Html5QrCode.stop();
+        app1IsScanning = false;
+        app1ShowQRStatus('⏹️ Đã dừng quét', 'info');
+        app1ShowToast('Đã dừng camera', 'info');
+      } catch(error) {
+        console.log('⚠️ Lỗi khi dừng scanner:', error);
+        await app1CleanupScanner();
+      }
+    }
+  }
+
+  async function app1CleanupScanner() {
+    if (app1Html5QrCode) {
+      try {
+        if (app1IsScanning) {
+          await app1Html5QrCode.stop().catch(function() {});
+        }
+        if (app1Html5QrCode.clear) app1Html5QrCode.clear();
+        app1Html5QrCode = null;
+        app1IsScanning = false;
+      } catch(error) {
+        console.log('Cleanup error:', error);
+      }
+    }
+  }
+
+  function app1HandleImageUpload(file) {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      app1ShowToast('Vui lòng chọn file ảnh', 'error');
+      return;
+    }
+    
+    app1ShowLoading(true);
+    app1ShowQRStatus('🔄 Đang đọc ảnh QR...', 'info');
+    
+    var tempDiv = document.createElement('div');
+    tempDiv.id = 'temp_qr_scanner_' + Date.now();
+    tempDiv.style.cssText = 'position:fixed; top:-1000px; left:-1000px; width:300px; height:300px;';
+    document.body.appendChild(tempDiv);
+    
+    var tempQr = new Html5Qrcode(tempDiv.id);
+    
+    tempQr.scanFile(file, true)
+      .then(function(decodedText) {
+        if (tempDiv && tempDiv.parentNode) document.body.removeChild(tempDiv);
+        app1ShowLoading(false);
+        
+        if (decodedText && decodedText.trim()) {
+          app1HandleQRCode(decodedText);
+        } else {
+          app1ShowQRStatus('❌ Không đọc được mã QR trong ảnh', 'error');
+          app1ShowToast('Không tìm thấy mã QR', 'error');
+        }
+      })
+      .catch(function(error) {
+        if (tempDiv && tempDiv.parentNode) document.body.removeChild(tempDiv);
+        app1ShowLoading(false);
+        console.error('Lỗi quét file:', error);
+        app1ShowQRStatus('❌ Lỗi: ' + error.message, 'error');
+        app1ShowToast('Không thể đọc mã QR từ ảnh', 'error');
+      });
+  }
+
+  // ===== APP 1 - SUBMIT =====
+  function app1SubmitForm() {
+    if (!app1FormValid.agreement) {
+      app1ShowToast('Vui lòng đồng ý cam kết!', 'error');
+      return;
+    }
+    
+    var addressVal = document.getElementById('app1_permanentAddress').value.trim();
+    var addressValidation = app1ValidateAddressFormat(addressVal);
+    if (!addressValidation.valid) {
+      app1ShowToast(addressValidation.message, 'error');
+      return;
+    }
+    
+    app1ShowLoading(true);
+    var btn = document.getElementById('app1_submitBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ĐANG XỬ LÝ...';
+    
+    var formData = [
+      document.getElementById('app1_cccd').value.trim(),
+      document.getElementById('app1_fullName').value.trim(),
+      document.getElementById('app1_hometown').value,
+      document.getElementById('app1_expiryDate').value.trim(),
+      document.getElementById('app1_issuedBy').value,
+      document.getElementById('app1_ethnicity').value,
+      document.getElementById('app1_religion').value,
+      document.getElementById('app1_education').value,
+      document.getElementById('app1_maritalStatus').value,
+      document.getElementById('app1_personalPhone').value.trim(),
+      document.getElementById('app1_relativePhone').value.trim(),
+      document.getElementById('app1_relationship').value,
+      document.getElementById('app1_source').value,
+      document.getElementById('app1_workshop').value,
+      document.getElementById('app1_gender').value,
+      document.getElementById('app1_birthDate').value.trim(),
+      document.getElementById('app1_issueDate').value.trim(),
+      document.getElementById('app1_permanentAddress').value.trim()
+    ];
+    
+    // ✅ Dùng callAPIWithSession
+    callAPIWithSession('saveToSheet', formData).then(function(result) {
+      app1ShowLoading(false);
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-paper-plane"></i> GỬI THÔNG TIN';
+      
+      var msgDiv = document.getElementById('app1_message');
+      if (result && result.success) {
+        msgDiv.className = 'app1-message success';
+        msgDiv.innerHTML = '<i class="fas fa-check-circle"></i> '+result.message;
+        app1ShowToast(result.message, 'success');
+        
+        var modal = document.getElementById('app1_noticeModal');
+        if (modal) modal.classList.add('show');
+        
+        document.getElementById('app1Form').reset();
+        for (var key in app1FormValid) {
+          if (key === 'birthDate' || key === 'issueDate') {
+            app1FormValid[key] = true;
+          } else {
+            app1FormValid[key] = false;
+          }
+        }
+        app1ExpiryDateValid = false;
+        app1UpdateSubmitButton();
+        document.getElementById('app1_cccd-decoded').style.display = 'none';
+        document.getElementById('app1_expiryDate-info').style.display = 'none';
+        document.getElementById('app1_addressWarning').style.display = 'none';
+        document.querySelectorAll('.app1-form-control').forEach(function(el) {
+          el.classList.remove('valid', 'invalid');
+        });
+      } else {
+        if (result && result.needLogin) {
+          return;
+        }
+        msgDiv.className = 'app1-message error';
+        msgDiv.innerHTML = '<i class="fas fa-exclamation-triangle"></i> '+(result && result.message ? result.message : 'Có lỗi xảy ra');
+        app1ShowToast(result && result.message ? result.message : 'Lỗi', 'error');
+      }
+      
+      setTimeout(function() {
+        msgDiv.style.display = 'none';
+      }, 5000);
+    }).catch(function(error) {
+      app1ShowLoading(false);
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-paper-plane"></i> GỬI THÔNG TIN';
+      app1ShowToast('Lỗi: '+error.message, 'error');
+    });
+  }
+
+  // ===== APP 1 - LOAD DROPDOWNS =====
+  function app1LoadDropdowns() {
+    callAPI('getProvinces', null).then(function(data) {
+      var s = document.getElementById('app1_hometown');
+      s.innerHTML = '<option value="">-- CHỌN TỈNH/THÀNH --</option>';
+      if (data && Array.isArray(data)) {
+        for (var i = 0; i < data.length; i++) {
+          var o = document.createElement('option');
+          o.value = data[i];
+          o.textContent = data[i];
+          s.appendChild(o);
+        }
+      }
+    }).catch(function(error) { console.error('Lỗi tải danh sách tỉnh:', error); });
+    
+    callAPI('getEthnicGroups', null).then(function(data) {
+      var s = document.getElementById('app1_ethnicity');
+      s.innerHTML = '<option value="">-- CHỌN DÂN TỘC --</option>';
+      if (data && Array.isArray(data)) {
+        for (var i = 0; i < data.length; i++) {
+          var o = document.createElement('option');
+          o.value = data[i];
+          o.textContent = data[i];
+          s.appendChild(o);
+        }
+      }
+    }).catch(function(error) { console.error('Lỗi tải danh sách dân tộc:', error); });
+    
+    callAPI('getReligions', null).then(function(data) {
+      var s = document.getElementById('app1_religion');
+      s.innerHTML = '<option value="">-- CHỌN TÔN GIÁO --</option>';
+      if (data && Array.isArray(data)) {
+        for (var i = 0; i < data.length; i++) {
+          var o = document.createElement('option');
+          o.value = data[i];
+          o.textContent = data[i];
+          s.appendChild(o);
+        }
+      }
+    }).catch(function(error) { console.error('Lỗi tải danh sách tôn giáo:', error); });
+    
+    callAPI('getIssuingAuthorities', null).then(function(data) {
+      var s = document.getElementById('app1_issuedBy');
+      s.innerHTML = '<option value="">-- CHỌN --</option>';
+      if (data && Array.isArray(data)) {
+        for (var i = 0; i < data.length; i++) {
+          var o = document.createElement('option');
+          o.value = data[i];
+          o.textContent = data[i];
+          s.appendChild(o);
+        }
+      }
+    }).catch(function(error) { console.error('Lỗi tải danh sách nơi cấp:', error); });
+    
+    callAPI('getEducationLevels', null).then(function(data) {
+      var s = document.getElementById('app1_education');
+      s.innerHTML = '<option value="">-- CHỌN --</option>';
+      if (data && Array.isArray(data)) {
+        for (var i = 0; i < data.length; i++) {
+          var o = document.createElement('option');
+          o.value = data[i];
+          o.textContent = data[i];
+          s.appendChild(o);
+        }
+      }
+    }).catch(function(error) { console.error('Lỗi tải danh sách trình độ:', error); });
+    
+    callAPI('getRelations', null).then(function(data) {
+      var s = document.getElementById('app1_relationship');
+      s.innerHTML = '<option value="">-- CHỌN --</option>';
+      if (data && Array.isArray(data)) {
+        for (var i = 0; i < data.length; i++) {
+          var o = document.createElement('option');
+          o.value = data[i];
+          o.textContent = data[i];
+          s.appendChild(o);
+        }
+      }
+    }).catch(function(error) { console.error('Lỗi tải danh sách quan hệ:', error); });
+    
+    callAPI('getSources', null).then(function(data) {
+      var s = document.getElementById('app1_source');
+      s.innerHTML = '<option value="">-- CHỌN --</option>';
+      if (data && Array.isArray(data)) {
+        for (var i = 0; i < data.length; i++) {
+          var o = document.createElement('option');
+          o.value = data[i];
+          o.textContent = data[i];
+          s.appendChild(o);
+        }
+      }
+    }).catch(function(error) { console.error('Lỗi tải danh sách nguồn tin:', error); });
+    
+    callAPI('getWorkshops', null).then(function(data) {
+      var s = document.getElementById('app1_workshop');
+      s.innerHTML = '<option value="">-- CHỌN --</option>';
+      if (data && Array.isArray(data)) {
+        for (var i = 0; i < data.length; i++) {
+          var o = document.createElement('option');
+          o.value = data[i];
+          o.textContent = data[i];
+          s.appendChild(o);
+        }
+      }
+    }).catch(function(error) { console.error('Lỗi tải danh sách xưởng:', error); });
+  }
+
+  // ===== APP 1 - SETUP =====
+  function app1SetupEventListeners() {
+    document.getElementById('app1_cccd').addEventListener('input', function(e) {
+      e.target.value = e.target.value.replace(/\D/g, '');
+      app1ValidateCCCD();
+    });
+    
+    document.getElementById('app1_fullName').addEventListener('blur', function(e) {
+      var v = e.target.value;
+      if (v) e.target.value = app1CapitalizeName(v);
+      app1ValidateFullName();
+    });
+    document.getElementById('app1_fullName').addEventListener('input', app1ValidateFullName);
+    document.getElementById('app1_hometown').addEventListener('change', app1ValidateHometown);
+    document.getElementById('app1_gender').addEventListener('change', app1ValidateGender);
+    
+    document.getElementById('app1_expiryDate').addEventListener('input', function(e) {
+      var v = e.target.value.replace(/\D/g, '');
+      if (v.length >= 2 && v.length < 4) {
+        v = v.substring(0,2) + '/' + v.substring(2);
+      } else if (v.length >= 4) {
+        v = v.substring(0,2) + '/' + v.substring(2,4) + '/' + v.substring(4,8);
+      }
+      e.target.value = v;
+      app1ValidateExpiryDate();
+    });
+    
+    document.getElementById('app1_issuedBy').addEventListener('change', app1ValidateIssuedBy);
+    document.getElementById('app1_ethnicity').addEventListener('change', app1ValidateEthnicity);
+    document.getElementById('app1_religion').addEventListener('change', app1ValidateReligion);
+    document.getElementById('app1_education').addEventListener('change', app1ValidateEducation);
+    document.getElementById('app1_maritalStatus').addEventListener('change', app1ValidateMaritalStatus);
+    
+    document.getElementById('app1_personalPhone').addEventListener('input', function(e) {
+      e.target.value = e.target.value.replace(/\D/g, '').slice(0, 10);
+      app1ValidatePersonalPhone();
+    });
+    
+    document.getElementById('app1_relativePhone').addEventListener('input', function(e) {
+      e.target.value = e.target.value.replace(/\D/g, '').slice(0, 10);
+      app1ValidateRelativePhone();
+    });
+    
+    document.getElementById('app1_relationship').addEventListener('change', app1ValidateRelationship);
+    document.getElementById('app1_source').addEventListener('change', app1ValidateSource);
+    document.getElementById('app1_workshop').addEventListener('change', app1ValidateWorkshop);
+    
+    document.getElementById('app1_agreement').addEventListener('change', function(e) {
+      app1FormValid.agreement = e.target.checked;
+      app1UpdateSubmitButton();
+    });
+    
+    document.getElementById('app1_birthDate').addEventListener('input', function(e) {
+      var v = e.target.value.replace(/[^0-9]/g, '');
+      if (v.length >= 2 && v.length < 4) {
+        v = v.substring(0,2) + '-' + v.substring(2);
+      } else if (v.length >= 4 && v.length < 6) {
+        v = v.substring(0,2) + '-' + v.substring(2,4) + '-' + v.substring(4);
+      } else if (v.length >= 6) {
+        v = v.substring(0,2) + '-' + v.substring(2,4) + '-' + v.substring(4,8);
+      }
+      e.target.value = v;
+    });
+    
+    document.getElementById('app1_issueDate').addEventListener('input', function(e) {
+      var v = e.target.value.replace(/[^0-9]/g, '');
+      if (v.length >= 2 && v.length < 4) {
+        v = v.substring(0,2) + '-' + v.substring(2);
+      } else if (v.length >= 4 && v.length < 6) {
+        v = v.substring(0,2) + '-' + v.substring(2,4) + '-' + v.substring(4);
+      } else if (v.length >= 6) {
+        v = v.substring(0,2) + '-' + v.substring(2,4) + '-' + v.substring(4,8);
+      }
+      e.target.value = v;
+    });
+    
+    document.getElementById('app1_permanentAddress').addEventListener('input', app1ValidatePermanentAddress);
+    document.getElementById('app1_permanentAddress').addEventListener('blur', app1ValidatePermanentAddress);
+    document.getElementById('app1Form').addEventListener('submit', function(e) {
+      e.preventDefault();
+      app1SubmitForm();
+    });
+  }
+
+  function app1SetupQRButtons() {
+    document.getElementById('app1_startScanBtn').addEventListener('click', app1StartScanner);
+    document.getElementById('app1_stopScanBtn').addEventListener('click', app1StopScanner);
+    document.getElementById('app1_uploadImageBtn').addEventListener('click', function() {
+      document.getElementById('app1_fileInput').click();
+    });
+    document.getElementById('app1_fileInput').addEventListener('change', function(e) {
+      if (e.target.files && e.target.files[0]) {
+        app1HandleImageUpload(e.target.files[0]);
+      }
+      this.value = '';
+    });
+    document.getElementById('app1_cameraSelect').addEventListener('change', function() {
+      if (app1IsScanning) {
+        app1StopScanner();
+        setTimeout(function() { app1StartScanner(); }, 500);
+      }
+    });
+  }
+
+  var app1Initialized = false;
+  
+  function initApp1() {
+    if (app1Initialized) return;
+    app1Initialized = true;
+    console.log('🚀 App 1 khởi động...');
+    app1LoadDropdowns();
+    app1SetupEventListeners();
+    app1SetupQRButtons();
+    app1LoadCameras();
+    app1UpdateSubmitButton();
+    
+    document.getElementById('app1_noticeConfirmBtn').addEventListener('click', function() {
+      var modal = document.getElementById('app1_noticeModal');
+      if (modal) {
+        modal.classList.remove('show');
+        app1ShowToast('Cảm ơn bạn đã đọc thông báo!', 'success');
+      }
+    });
+    
+    console.log('✅ App 1 đã sẵn sàng');
+  }
+  // ===== APP 2 - SCAN ID =====
   var app2Html5QrCode = null;
   var app2IsScanning = false;
   var app2CurrentData = null;
@@ -2508,9 +3964,9 @@
     };
     
     app2ShowLoading(true);
-    var sessionToken = getSessionToken();
     
-    callAPI('saveCCCD', data, sessionToken).then(function(result) {
+    // ✅ Dùng callAPIWithSession
+    callAPIWithSession('saveCCCD', data).then(function(result) {
       app2ShowLoading(false);
       
       if (result && result.status === 'success') {
@@ -2520,6 +3976,9 @@
         document.getElementById('app2_reader').classList.add('success');
         document.getElementById('app2_sttQuet').value = '';
       } else {
+        if (result && result.needLogin) {
+          return;
+        }
         app2ShowToast(result && result.message ? result.message : 'Lỗi lưu dữ liệu', 'error');
         app2ShowStatus('❌ ' + (result && result.message ? result.message : 'Lỗi'), 'error');
       }
@@ -3027,15 +4486,18 @@
     }
     
     app3ShowLoading(true);
-    var sessionToken = getSessionToken();
     
-    callAPI('saveFullApplication', data, sessionToken).then(function(result) {
+    // ✅ Dùng callAPIWithSession
+    callAPIWithSession('saveFullApplication', data).then(function(result) {
       app3ShowLoading(false);
       
       if (result && result.success) {
         app3ShowModal('✅', 'Thành công!', result.message || 'Đã lưu thông tin thành công!');
         app3ResetAll();
       } else {
+        if (result && result.needLogin) {
+          return;
+        }
         app3ShowModal('❌', 'Lỗi', result && result.error ? result.error : 'Không thể lưu dữ liệu');
       }
     }).catch(function(error) {
@@ -3290,9 +4752,9 @@
     };
     
     app4ShowLoading(true);
-    var sessionToken = getSessionToken();
     
-    callAPI('saveToDuBi', data, sessionToken).then(function(result) {
+    // ✅ Dùng callAPIWithSession
+    callAPIWithSession('saveToDuBi', data).then(function(result) {
       app4ShowLoading(false);
       
       if (result && result.success) {
@@ -3308,6 +4770,9 @@
           }
         });
       } else {
+        if (result && result.needLogin) {
+          return;
+        }
         app4ShowToast('❌ ' + (result.error || 'Lỗi lưu dữ liệu'), 'error');
       }
     }).catch(function(error) {
@@ -3717,9 +5182,9 @@
     
     closeExportMasterModal();
     dashShowLoading(true);
-    var sessionToken = getSessionToken();
     
-    callAPI('exportMasterSheet', { filterType: type, filterValue: value }, sessionToken).then(function(result) {
+    // ✅ Dùng callAPIWithSession
+    callAPIWithSession('exportMasterSheet', { filterType: type, filterValue: value }).then(function(result) {
       dashShowLoading(false);
       
       if (result && result.success && result.fileBase64) {
@@ -3731,6 +5196,9 @@
         document.body.removeChild(link);
         dashShowToast('✅ Xuất file thành công! ' + (result.rowCount || 0) + ' dòng', 'success');
       } else {
+        if (result && result.needLogin) {
+          return;
+        }
         dashShowToast('❌ ' + (result.error || 'Lỗi xuất file'), 'error');
       }
     }).catch(function(error) {
@@ -3935,6 +5403,9 @@
     document.getElementById('mainApp').style.display = 'block';
     document.getElementById('userName').innerText = currentUserHoTen || (currentUserRole === 'candidate' ? 'Ứng viên' : 'NV');
     
+    // ✅ Bắt đầu refresh session tự động
+    startSessionRefresh();
+    
     var tabApp2 = document.getElementById('tabApp2');
     var tabApp3 = document.getElementById('tabApp3');
     var tabApp4 = document.getElementById('tabApp4');
@@ -3975,8 +5446,16 @@
   window.activateTab = activateTab;
 
   async function logout() {
-    if (currentSessionToken) { try { await callAPI('doLogout', currentSessionToken); } catch(e) {} }
+    // Gửi request logout với session token
+    if (currentSessionToken) {
+      try { 
+        await callAPI('doLogout', null, currentSessionToken); 
+      } catch(e) {}
+    }
+    
+    // Clear session
     clearSession();
+    
     document.getElementById('mainApp').style.display = 'none';
     document.getElementById('loginScreen').style.display = 'flex';
     document.getElementById('staffPassword').value = '';
@@ -4042,6 +5521,8 @@
   function setupDebugButtons() {
     var debugBtn = document.getElementById('debugBtn');
     var seedBtn = document.getElementById('seedBtn');
+    var testConnBtn = document.getElementById('testConnBtn');
+    var testCorsBtn = document.getElementById('testCorsBtn');
     var debugResult = document.getElementById('debugResult');
     
     if (debugBtn) {
@@ -4098,6 +5579,30 @@
         }).catch(function(error) {
           debugResult.innerHTML = '❌ Lỗi: ' + (error.message || 'Không xác định');
         });
+      });
+    }
+    
+    if (testConnBtn) {
+      testConnBtn.addEventListener('click', async function() {
+        debugResult.innerHTML = '⏳ Đang kiểm tra kết nối...';
+        var result = await testConnection();
+        if (result) {
+          debugResult.innerHTML = '✅ Kết nối thành công!';
+        } else {
+          debugResult.innerHTML = '❌ Kết nối thất bại. Kiểm tra URL API.';
+        }
+      });
+    }
+    
+    if (testCorsBtn) {
+      testCorsBtn.addEventListener('click', async function() {
+        debugResult.innerHTML = '⏳ Đang kiểm tra CORS...';
+        var result = await testCORS();
+        if (result && result['Access-Control-Allow-Origin']) {
+          debugResult.innerHTML = '✅ CORS OK! Server cho phép truy cập.';
+        } else {
+          debugResult.innerHTML = '❌ CORS lỗi! Server không cho phép truy cập.';
+        }
       });
     }
   }
@@ -4178,6 +5683,8 @@
   window.app4ConfirmExport = app4ConfirmExport;
   window.closeExportMasterModal = closeExportMasterModal;
   window.confirmExportMaster = confirmExportMaster;
+  window.testConnection = testConnection;
+  window.testCORS = testCORS;
 </script>
 </body>
 </html>
